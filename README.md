@@ -72,8 +72,9 @@ Quit Claude Desktop from the tray (not just close the window) and reopen.
 
 | Tool | Args | What |
 |---|---|---|
-| `spawn_cube` | `x, y, z` | Spawn a basic cube at world location. |
+| `spawn_cube` | `x, y, z` | Spawn a basic cube at world location. Returns the actor name. |
 | `execute_python` | `code` | Run arbitrary Python in the editor. Returns stdout. |
+| `verify_actors` | `actor_names, views=[top,front,side,hero,context], context_distance_factor=8.0, width=512, height=512, fov=60.0` | Take canonical-view screenshots of the given actors and return them with the union AABB as metadata. Call after each batch of spawn/move ops to close the visual feedback loop. Screenshots are written to `<UEProject>/Saved/LetheShots/`. |
 
 Add your own:
 
