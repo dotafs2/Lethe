@@ -75,6 +75,19 @@ Quit Claude Desktop from the tray (not just close the window) and reopen.
 | `spawn_cube` | `x, y, z` | Spawn a basic cube at world location. Returns the actor name. |
 | `execute_python` | `code` | Run arbitrary Python in the editor. Returns stdout. |
 | `verify_actors` | `actor_names, views=[top,front,side,hero,context], context_distance_factor=8.0, width=512, height=512, fov=60.0` | Take canonical-view screenshots of the given actors and return them with the union AABB as metadata. Call after each batch of spawn/move ops to close the visual feedback loop. Screenshots are written to `<UEProject>/Saved/LetheShots/`. |
+| `polyhaven_status` | — | Report whether the PolyHaven integration is toggled on in the editor menu. |
+| `polyhaven_search_hdri` | `query="", max_results=20` | Search PolyHaven's HDRI library. Returns slugs to feed into `polyhaven_set_sky`. |
+| `polyhaven_set_sky` | `slug, resolution="2k"` | Download an HDRI and set it as the current level's sky via a single tagged `HDRIBackdrop` actor (repeat calls swap, don't stack). |
+
+### Integrations (hot-switched)
+
+Open **Tools → Lethe** in the UE editor to toggle integrations with a ☑/☐ checkmark.
+Toggles are written to `<UEProject>/Saved/Lethe/config.json` and re-read on every
+MCP tool call — no editor or server restart needed.
+
+- **PolyHaven** — HDRI sky. Assets cached at `<UEProject>/Saved/Lethe/Downloads/HDRI/`
+  and imported into `/Game/Lethe/HDRI/`. Requires the `HDRIBackdrop` plugin
+  (already a dependency of `Lethe.uplugin`).
 
 Add your own:
 

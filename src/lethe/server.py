@@ -4,11 +4,11 @@ Tools exposed:
     - execute_python(code): run arbitrary Python inside the UE editor.
     - spawn_cube(x, y, z): convenience demo that spawns a basic cube.
     - verify_actors(names, views, ...): take standard screenshots + AABB of actors.
+    - polyhaven_search_hdri(query, max_results): list matching HDRIs from PolyHaven.
+    - polyhaven_set_sky(slug, resolution): download + apply as HDRIBackdrop sky.
 
-UE side requirements:
-    - PythonScriptPlugin enabled in the .uproject
-    - Remote Execution enabled in Project Settings → Plugins → Python
-    - Editor must be running when Claude calls a tool.
+Integration toggles (hot-switched): read on every tool call from
+<UEProject>/Saved/Lethe/config.json, written by the Tools > Lethe menu in UE.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+import urllib.request
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP, Image
@@ -300,6 +301,250 @@ def verify_actors(
         with open(path, "rb") as f:
             result.append(Image(data=f.read(), format="png"))
     return result
+
+
+# ---------------------------------------------------------------------------
+# PolyHaven HDRI — search + apply as HDRIBackdrop sky
+# ---------------------------------------------------------------------------
+
+_POLYHAVEN_API = "https://api.polyhaven.com"
+_ue_saved_dir_cache: str | None = None
+_polyhaven_assets_cache: dict | None = None
+
+
+def _ue_saved_dir() -> str:
+    """Query UE for its project Saved dir and cache the absolute path."""
+    global _ue_saved_dir_cache
+    if _ue_saved_dir_cache is None:
+        probe = (
+            "import unreal\n"
+            "print('LETHE_PATH::' + unreal.Paths.convert_relative_path_to_full("
+            "unreal.Paths.project_saved_dir()))\n"
+        )
+        out = _run_in_ue(probe)
+        for line in out.splitlines():
+            tag = "LETHE_PATH::"
+            idx = line.find(tag)
+            if idx >= 0:
+                _ue_saved_dir_cache = line[idx + len(tag):].strip()
+                break
+        if not _ue_saved_dir_cache:
+            raise RuntimeError(f"Could not query UE project Saved dir. UE output:\n{out}")
+    return _ue_saved_dir_cache
+
+
+def _read_lethe_config() -> dict:
+    """Read Tools > Lethe toggle state from disk — fresh every call (hot-switch)."""
+    cfg_path = os.path.join(_ue_saved_dir(), "Lethe", "config.json")
+    if not os.path.exists(cfg_path):
+        return {}
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning("Could not read %s: %s", cfg_path, e)
+        return {}
+
+
+def _gate(integration: str) -> str | None:
+    """Returns None if the integration is enabled, else a message to bounce back to Claude."""
+    if not _read_lethe_config().get(integration, False):
+        return (
+            f"{integration} integration is disabled. In the UE editor, enable it "
+            f"via Tools > Lethe > {integration.capitalize()}, then call again. "
+            "(Setting is hot-switched — no restart needed.)"
+        )
+    return None
+
+
+def _http_get_json(url: str, timeout: float = 30.0) -> Any:
+    req = urllib.request.Request(url, headers={"User-Agent": "lethe-mcp/0.1"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _http_download(url: str, dest: str, timeout: float = 120.0) -> None:
+    req = urllib.request.Request(url, headers={"User-Agent": "lethe-mcp/0.1"})
+    tmp = dest + ".part"
+    with urllib.request.urlopen(req, timeout=timeout) as r, open(tmp, "wb") as f:
+        while True:
+            chunk = r.read(65536)
+            if not chunk:
+                break
+            f.write(chunk)
+    os.replace(tmp, dest)
+
+
+def _polyhaven_assets(asset_type: str = "hdris") -> dict:
+    global _polyhaven_assets_cache
+    if _polyhaven_assets_cache is None:
+        _polyhaven_assets_cache = _http_get_json(f"{_POLYHAVEN_API}/assets?t={asset_type}")
+    return _polyhaven_assets_cache
+
+
+_SET_SKY_SCRIPT = r'''
+import unreal, json, os
+
+_PATH = r"{local_path}".replace("\\", "/")
+_SLUG = "{slug}"
+_PKG_DIR = "/Game/Lethe/HDRI"
+_ASSET_PATH = _PKG_DIR + "/" + _SLUG
+_ACTOR_TAG = "LetheSky"
+
+# --- Import the .hdr file as a Texture2D asset ----------------------------
+_task = unreal.AssetImportTask()
+_task.filename = _PATH
+_task.destination_path = _PKG_DIR
+_task.destination_name = _SLUG
+_task.automated = True
+_task.replace_existing = True
+_task.save = True
+unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([_task])
+_tex = unreal.EditorAssetLibrary.load_asset(_ASSET_PATH)
+
+if _tex is None:
+    print("LETHE_JSON::" + json.dumps({{"error": "HDR import failed", "path": _PATH}}))
+else:
+    _subsys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+
+    # --- Find or spawn a single tagged HDRIBackdrop ----------------------
+    _backdrop = None
+    for _a in _subsys.get_all_level_actors():
+        if _a.actor_has_tag(_ACTOR_TAG):
+            _backdrop = _a
+            break
+
+    _hdri_class = unreal.load_class(None, "/Script/HDRIBackdrop.HDRIBackdrop")
+    if _hdri_class is None:
+        print("LETHE_JSON::" + json.dumps({{"error": "HDRIBackdrop plugin not enabled. Enable the Lethe plugin (which depends on it) and restart the editor."}}))
+    else:
+        if _backdrop is None:
+            _backdrop = _subsys.spawn_actor_from_class(_hdri_class, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
+            _backdrop.tags = [_ACTOR_TAG]
+            _backdrop.set_actor_label("Lethe_Sky")
+
+        _backdrop.set_editor_property("cubemap", _tex)
+
+        print("LETHE_JSON::" + json.dumps({{
+            "ok": True,
+            "asset": _ASSET_PATH,
+            "actor": _backdrop.get_name(),
+            "spawned_new": bool(not _backdrop.actor_has_tag(_ACTOR_TAG + "_existing")),
+        }}))
+'''
+
+
+@mcp.tool()
+def polyhaven_status() -> str:
+    """Report whether PolyHaven integration is currently enabled (via Tools > Lethe).
+
+    If disabled, the other polyhaven_* tools will refuse to run — tell the user
+    to enable it in the editor menu first.
+    """
+    enabled = _read_lethe_config().get("polyhaven", False)
+    return json.dumps({
+        "polyhaven": "enabled" if enabled else "disabled",
+        "hint": None if enabled else "Enable via Tools > Lethe > PolyHaven in the editor.",
+    })
+
+
+@mcp.tool()
+def polyhaven_search_hdri(query: str = "", max_results: int = 20) -> str:
+    """Search PolyHaven's HDRI library. Returns JSON list of matches.
+
+    Use the returned `slug` as input to `polyhaven_set_sky`. Empty query lists
+    recent/featured HDRIs up to max_results.
+    """
+    gate = _gate("polyhaven")
+    if gate:
+        return gate
+
+    assets = _polyhaven_assets("hdris")
+    q = query.lower().strip()
+    hits = []
+    for slug, meta in assets.items():
+        name = (meta.get("name") or slug).lower()
+        cats = [c.lower() for c in meta.get("categories", [])]
+        tags = [t.lower() for t in meta.get("tags", [])]
+        if not q or q in slug.lower() or q in name or any(q in c for c in cats) or any(q in t for t in tags):
+            hits.append({
+                "slug": slug,
+                "name": meta.get("name") or slug,
+                "categories": meta.get("categories", []),
+                "tags": meta.get("tags", [])[:6],
+            })
+            if len(hits) >= max_results:
+                break
+    return json.dumps({"count": len(hits), "results": hits}, indent=2)
+
+
+@mcp.tool()
+def polyhaven_set_sky(slug: str, resolution: str = "2k") -> str:
+    """Download a PolyHaven HDRI and set it as the current level's sky.
+
+    Creates or reuses a tagged HDRIBackdrop actor so repeated calls swap the sky
+    instead of stacking backdrops. Assets are cached under
+    <UEProject>/Saved/Lethe/Downloads/HDRI/ and imported to /Game/Lethe/HDRI/.
+
+    Typical resolutions: '1k', '2k', '4k', '8k'. 2k is a good default.
+    """
+    gate = _gate("polyhaven")
+    if gate:
+        return gate
+
+    # Resolve download URL via PolyHaven files API
+    try:
+        files = _http_get_json(f"{_POLYHAVEN_API}/files/{slug}")
+    except Exception as e:
+        return f"Could not fetch files manifest for slug '{slug}': {e}"
+
+    hdri_section = files.get("hdri") or {}
+    if resolution not in hdri_section:
+        return f"No {resolution} HDR for '{slug}'. Available: {sorted(hdri_section.keys())}"
+    hdr_info = hdri_section[resolution].get("hdr") or {}
+    url = hdr_info.get("url")
+    if not url:
+        return f"No 'hdr' format for '{slug}' at {resolution}. Got: {hdri_section[resolution]}"
+
+    # Cache download under <UEProject>/Saved/Lethe/Downloads/HDRI/
+    cache_dir = os.path.join(_ue_saved_dir(), "Lethe", "Downloads", "HDRI")
+    os.makedirs(cache_dir, exist_ok=True)
+    local_path = os.path.join(cache_dir, f"{slug}_{resolution}.hdr")
+    if not os.path.exists(local_path):
+        logger.info("Downloading %s -> %s", url, local_path)
+        try:
+            _http_download(url, local_path)
+        except Exception as e:
+            return f"Download failed ({url}): {e}"
+
+    # Hand off to UE: import + apply
+    script = _SET_SKY_SCRIPT.format(
+        local_path=local_path.replace("\\", "\\\\"),
+        slug=slug,
+    )
+    stdout = _run_in_ue(script)
+    payload = None
+    for line in stdout.splitlines():
+        tag = "LETHE_JSON::"
+        idx = line.find(tag)
+        if idx >= 0:
+            try:
+                payload = json.loads(line[idx + len(tag):])
+            except Exception:
+                pass
+            break
+    if payload is None:
+        return f"Unexpected UE output:\n{stdout}"
+    if "error" in payload:
+        return f"polyhaven_set_sky: {payload['error']}"
+    return json.dumps({
+        "ok": True,
+        "slug": slug,
+        "resolution": resolution,
+        "local_file": local_path,
+        "asset": payload["asset"],
+        "actor": payload["actor"],
+    }, indent=2)
 
 
 # ---------------------------------------------------------------------------
