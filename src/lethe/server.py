@@ -12,12 +12,15 @@ Integration toggles (hot-switched): read on every tool call from
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
 import time
 import urllib.request
 from typing import Any
+
+from PIL import Image as PILImage
 
 from mcp.server.fastmcp import FastMCP, Image
 
@@ -190,14 +193,12 @@ else:
                     LETHE_CONTEXT_K * 0.75 * _L),
     }
 
-    _rt = unreal.new_object(unreal.TextureRenderTarget2D)
-    _rt.init_auto_format(LETHE_W, LETHE_H)
+    _world = _ued_subsys.get_editor_world()
+    _rt = unreal.RenderingLibrary.create_render_target2d(_world, LETHE_W, LETHE_H)
 
     _save_dir = unreal.Paths.convert_relative_path_to_full(
         os.path.join(unreal.Paths.project_saved_dir(), "LetheShots"))
     os.makedirs(_save_dir, exist_ok=True)
-
-    _world = _ued_subsys.get_editor_world()
     _files = {}
     for _view in LETHE_VIEWS:
         if _view not in _offsets:
@@ -299,7 +300,10 @@ def verify_actors(
             result.append(f"[view {view}] file missing: {path}")
             continue
         with open(path, "rb") as f:
-            result.append(Image(data=f.read(), format="png"))
+            png_data = f.read()
+        buf = io.BytesIO()
+        PILImage.open(io.BytesIO(png_data)).convert("RGB").save(buf, format="JPEG", quality=85)
+        result.append(Image(data=buf.getvalue(), format="jpeg"))
     return result
 
 
