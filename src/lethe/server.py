@@ -194,7 +194,8 @@ else:
     }
 
     _world = _ued_subsys.get_editor_world()
-    _rt = unreal.RenderingLibrary.create_render_target2d(_world, LETHE_W, LETHE_H)
+    _rt = unreal.RenderingLibrary.create_render_target2d(
+        _world, LETHE_W, LETHE_H, unreal.TextureRenderTargetFormat.RTF_RGBA8)
 
     _save_dir = unreal.Paths.convert_relative_path_to_full(
         os.path.join(unreal.Paths.project_saved_dir(), "LetheShots"))
@@ -211,7 +212,7 @@ else:
             _comp = _sc.scene_capture_component2d
             _comp.texture_target = _rt
             _comp.fov_angle = LETHE_FOV
-            _comp.capture_source = unreal.SceneCaptureSource.FINAL_COLOR_LDR
+            _comp.capture_source = unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR
             _comp.capture_scene()
             _fname = "lethe_" + _view + ".png"
             unreal.RenderingLibrary.export_render_target(_world, _rt, _save_dir, _fname)
