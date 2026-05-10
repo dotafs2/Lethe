@@ -119,6 +119,55 @@ def spawn_cube(x: float = 0.0, y: float = 0.0, z: float = 200.0) -> str:
     return _run_in_ue(code)
 
 
+@mcp.tool()
+def spawn_box(
+    x: float = 0.0, y: float = 0.0, z: float = 100.0,
+    sx: float = 1.0, sy: float = 1.0, sz: float = 1.0,
+    pitch: float = 0.0, yaw: float = 0.0, roll: float = 0.0,
+    tag: str = "",
+) -> str:
+    """Spawn a unit cube and immediately scale + rotate it. Returns actor name.
+
+    A default Engine cube is 100x100x100 uu. Scale 1.0 == 100 uu == 1 m at
+    default Unreal scale. Use (sx, sy, sz) to make walls/floors/furniture from
+    a single primitive. Optional pitch/yaw/roll in degrees. `tag` is stored as
+    an actor tag so the actor can be selected/cleared in bulk later.
+
+    After a batch of spawns, take screenshots through verify_actors (or
+    execute_python) to confirm the layout before continuing.
+    """
+    code = (
+        "import unreal\n"
+        "s = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)\n"
+        "m = unreal.EditorAssetLibrary.load_asset('/Engine/BasicShapes/Cube.Cube')\n"
+        f"loc = unreal.Vector({x}, {y}, {z})\n"
+        f"rot = unreal.Rotator({roll}, {pitch}, {yaw})\n"
+        "a = s.spawn_actor_from_object(m, loc, rot)\n"
+        f"a.set_actor_scale3d(unreal.Vector({sx}, {sy}, {sz}))\n"
+        f"_tag = {tag!r}\n"
+        "if _tag:\n"
+        "    a.tags = [unreal.Name(_tag)]\n"
+        "print('spawned', a.get_name())\n"
+    )
+    return _run_in_ue(code)
+
+
+@mcp.tool()
+def clear_tag(tag: str) -> str:
+    """Destroy every actor whose tag list contains `tag`. Returns count."""
+    code = (
+        "import unreal\n"
+        "s = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)\n"
+        f"_t = unreal.Name({tag!r})\n"
+        "killed = 0\n"
+        "for a in list(s.get_all_level_actors()):\n"
+        "    if _t in a.tags:\n"
+        "        s.destroy_actor(a); killed += 1\n"
+        f"print('deleted', killed, 'actors with tag {tag}')\n"
+    )
+    return _run_in_ue(code)
+
+
 # ---------------------------------------------------------------------------
 # verify_actors — canonical-view screenshots + union AABB
 # ---------------------------------------------------------------------------
@@ -209,7 +258,7 @@ else:
         _rot = _lethe_look_at(_cam, _C)
         _sc = _actor_subsys.spawn_actor_from_class(unreal.SceneCapture2D, _cam, _rot)
         try:
-            _comp = _sc.scene_capture_component2d
+            _comp = _sc.capture_component2d
             _comp.texture_target = _rt
             _comp.fov_angle = LETHE_FOV
             _comp.capture_source = unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR
