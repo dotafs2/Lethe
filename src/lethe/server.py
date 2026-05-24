@@ -6,6 +6,8 @@ Tools exposed:
     - verify_actors(names, views, ...): take standard screenshots + AABB of actors.
     - polyhaven_search_hdri(query, max_results): list matching HDRIs from PolyHaven.
     - polyhaven_set_sky(slug, resolution): download + apply as HDRIBackdrop sky.
+    - polyhaven_search_model(query, max_results): list matching 3D models from PolyHaven.
+    - polyhaven_spawn_model(slug, ...): download glTF, import as StaticMesh, spawn actor.
 
 Integration toggles (hot-switched): read on every tool call from
 <UEProject>/Saved/Lethe/config.json, written by the Tools > Lethe menu in UE.
@@ -363,7 +365,7 @@ def verify_actors(
 
 _POLYHAVEN_API = "https://api.polyhaven.com"
 _ue_saved_dir_cache: str | None = None
-_polyhaven_assets_cache: dict | None = None
+_polyhaven_assets_cache: dict[str, dict] = {}
 
 
 def _ue_saved_dir() -> str:
@@ -430,10 +432,11 @@ def _http_download(url: str, dest: str, timeout: float = 120.0) -> None:
 
 
 def _polyhaven_assets(asset_type: str = "hdris") -> dict:
-    global _polyhaven_assets_cache
-    if _polyhaven_assets_cache is None:
-        _polyhaven_assets_cache = _http_get_json(f"{_POLYHAVEN_API}/assets?t={asset_type}")
-    return _polyhaven_assets_cache
+    if asset_type not in _polyhaven_assets_cache:
+        _polyhaven_assets_cache[asset_type] = _http_get_json(
+            f"{_POLYHAVEN_API}/assets?t={asset_type}"
+        )
+    return _polyhaven_assets_cache[asset_type]
 
 
 _SET_SKY_SCRIPT = r'''
@@ -530,6 +533,189 @@ def polyhaven_search_hdri(query: str = "", max_results: int = 20) -> str:
             if len(hits) >= max_results:
                 break
     return json.dumps({"count": len(hits), "results": hits}, indent=2)
+
+
+_SPAWN_MODEL_SCRIPT = r'''
+import unreal, json, os, glob
+
+_GLTF_PATH = r"{gltf_path}".replace("\\", "/")
+_SLUG = "{slug}"
+_DEST_DIR = "/Game/Lethe/Models/" + _SLUG
+_LOC = unreal.Vector({x}, {y}, {z})
+_ROT = unreal.Rotator(0.0, 0.0, {yaw})
+_SCALE = {scale}
+_TAG = "{tag}"
+
+# --- Import via AssetImportTask (UE5.5 picks Interchange for glTF) ----------
+_task = unreal.AssetImportTask()
+_task.filename = _GLTF_PATH
+_task.destination_path = _DEST_DIR
+_task.replace_existing = True
+_task.automated = True
+_task.save = True
+unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([_task])
+
+# Find the imported StaticMesh (Interchange names it after the gltf basename)
+_mesh = None
+_reg = unreal.AssetRegistryHelpers.get_asset_registry()
+_assets = _reg.get_assets_by_path(_DEST_DIR, recursive=True)
+for _ad in _assets:
+    _a = _ad.get_asset()
+    if isinstance(_a, unreal.StaticMesh):
+        _mesh = _a
+        break
+
+if _mesh is None:
+    print("LETHE_JSON::" + json.dumps({{
+        "error": "No StaticMesh imported under " + _DEST_DIR,
+        "files_seen": [str(a.asset_name) for a in _assets][:10],
+    }}))
+else:
+    _eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    _actor = _eas.spawn_actor_from_object(_mesh, _LOC, _ROT)
+    _actor.set_actor_scale3d(unreal.Vector(_SCALE, _SCALE, _SCALE))
+    if _TAG:
+        _actor.tags = [unreal.Name(_TAG)]
+    print("LETHE_JSON::" + json.dumps({{
+        "ok": True,
+        "mesh": _mesh.get_path_name(),
+        "actor": _actor.get_name(),
+    }}))
+'''
+
+
+@mcp.tool()
+def polyhaven_search_model(query: str = "", max_results: int = 20) -> str:
+    """Search PolyHaven's 3D model library. Returns JSON list of matches.
+
+    Use the returned `slug` as input to `polyhaven_spawn_model`. Empty query
+    lists recent/featured models up to max_results. Models are CC0, downloaded
+    as glTF and imported via UE5.5 Interchange.
+    """
+    gate = _gate("polyhaven")
+    if gate:
+        return gate
+
+    assets = _polyhaven_assets("models")
+    q = query.lower().strip()
+    hits = []
+    for slug, meta in assets.items():
+        name = (meta.get("name") or slug).lower()
+        cats = [c.lower() for c in meta.get("categories", [])]
+        tags = [t.lower() for t in meta.get("tags", [])]
+        if not q or q in slug.lower() or q in name or any(q in c for c in cats) or any(q in t for t in tags):
+            hits.append({
+                "slug": slug,
+                "name": meta.get("name") or slug,
+                "categories": meta.get("categories", []),
+                "tags": meta.get("tags", [])[:6],
+            })
+            if len(hits) >= max_results:
+                break
+    return json.dumps({"count": len(hits), "results": hits}, indent=2)
+
+
+@mcp.tool()
+def polyhaven_spawn_model(
+    slug: str,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+    yaw: float = 0.0,
+    scale: float = 1.0,
+    resolution: str = "2k",
+    tag: str = "",
+) -> str:
+    """Download a PolyHaven 3D model (glTF), import as StaticMesh, spawn at (x,y,z).
+
+    Assets cached under <UEProject>/Saved/Lethe/Downloads/Models/<slug>/ and
+    imported to /Game/Lethe/Models/<slug>/. Textures bundled in the glTF file
+    are downloaded alongside and resolved during import.
+
+    `resolution` controls texture resolution ('1k','2k','4k') — falls back to
+    the highest available if requested resolution is missing. `scale` is a
+    uniform multiplier (1.0 = source scale; PolyHaven models are real-world
+    metric, so 1.0 ≈ 1 m at default Unreal scale).
+    """
+    gate = _gate("polyhaven")
+    if gate:
+        return gate
+
+    try:
+        files = _http_get_json(f"{_POLYHAVEN_API}/files/{slug}")
+    except Exception as e:
+        return f"Could not fetch files manifest for slug '{slug}': {e}"
+
+    gltf_section = files.get("gltf") or {}
+    if not gltf_section:
+        return f"No glTF for '{slug}'. Available formats: {sorted(files.keys())}"
+
+    # Pick resolution: prefer requested, else first available
+    if resolution not in gltf_section:
+        avail = sorted(gltf_section.keys())
+        if not avail:
+            return f"No glTF resolutions for '{slug}'."
+        resolution = avail[-1]
+    gltf_info = gltf_section[resolution].get("gltf") or {}
+    gltf_url = gltf_info.get("url")
+    if not gltf_url:
+        return f"No glTF file URL for '{slug}' at {resolution}. Got: {gltf_section[resolution]}"
+
+    # Set up local cache dir, mirror PolyHaven's "include" map (textures, .bin)
+    cache_root = os.path.join(_ue_saved_dir(), "Lethe", "Downloads", "Models", slug)
+    os.makedirs(cache_root, exist_ok=True)
+    gltf_name = os.path.basename(gltf_url.split("?")[0])
+    gltf_local = os.path.join(cache_root, gltf_name)
+    if not os.path.exists(gltf_local):
+        try:
+            _http_download(gltf_url, gltf_local)
+        except Exception as e:
+            return f"glTF download failed ({gltf_url}): {e}"
+
+    # Download all referenced sidecar files (textures, .bin) into matching paths
+    include = gltf_info.get("include") or {}
+    for rel_path, info in include.items():
+        url = info.get("url")
+        if not url:
+            continue
+        dest = os.path.join(cache_root, rel_path.replace("/", os.sep))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        if not os.path.exists(dest):
+            try:
+                _http_download(url, dest)
+            except Exception as e:
+                return f"Sidecar download failed ({url} -> {dest}): {e}"
+
+    # Hand off to UE: import + spawn
+    script = _SPAWN_MODEL_SCRIPT.format(
+        gltf_path=gltf_local.replace("\\", "\\\\"),
+        slug=slug,
+        x=x, y=y, z=z, yaw=yaw, scale=scale,
+        tag=tag,
+    )
+    stdout = _run_in_ue(script)
+    payload = None
+    for line in stdout.splitlines():
+        tag_marker = "LETHE_JSON::"
+        idx = line.find(tag_marker)
+        if idx >= 0:
+            try:
+                payload = json.loads(line[idx + len(tag_marker):])
+            except Exception:
+                pass
+            break
+    if payload is None:
+        return f"Unexpected UE output:\n{stdout}"
+    if "error" in payload:
+        return f"polyhaven_spawn_model: {payload['error']}\nFull UE output:\n{stdout}"
+    return json.dumps({
+        "ok": True,
+        "slug": slug,
+        "resolution": resolution,
+        "local_file": gltf_local,
+        "mesh": payload["mesh"],
+        "actor": payload["actor"],
+    }, indent=2)
 
 
 @mcp.tool()
