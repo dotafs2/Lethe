@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Weight Tree Placement Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-monospace, monospace; background: #141416; color: #ddd; overflow: hidden; }
+  #app { display: flex; height: 100vh; }
+  #canvas-wrap { flex: 1; position: relative; }
+  #sidebar { width: 340px; background: #1c1c20; border-left: 1px solid #2a2a30; padding: 12px; overflow-y: auto; }
+  button { display: block; width: 100%; margin: 4px 0; padding: 8px 10px; background: #2a2a30; color: #ddd; border: 1px solid #3a3a45; cursor: pointer; font-family: inherit; font-size: 12px; text-align: left; border-radius: 4px; }
+  button:hover { background: #353540; }
+  button.danger { background: #4a2a2a; border-color: #5a3a3a; }
+  h3 { margin: 14px 0 6px; color: #88aaff; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+  .legend { font-size: 11px; line-height: 1.7; }
+  .swatch { display: inline-block; width: 22px; text-align: center; }
+  .dag, .log { font-size: 11px; line-height: 1.5; background: #0c0c10; padding: 8px; border-radius: 4px; max-height: 240px; overflow-y: auto; white-space: pre-wrap; }
+  .log .entry { padding: 3px 0; border-bottom: 1px solid #1a1a22; font-family: inherit; }
+  .log .entry:last-child { border-bottom: none; }
+  label { display: flex; align-items: center; gap: 8px; font-size: 11px; margin: 4px 0; cursor: pointer; }
+  .hint { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.55); padding: 8px 10px; border-radius: 4px; font-size: 11px; color: #aaa; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="canvas-wrap">
+    <div class="hint">drag = orbit · scroll = zoom · right-drag = pan</div>
+  </div>
+  <div id="sidebar">
+    <h3>Add object</h3>
+    <button data-add="desk">+ Desk &nbsp;<span style="color:#888">(soft: nearest wall)</span></button>
+    <button data-add="chair">+ Chair <span style="color:#888">(soft: nearest desk)</span></button>
+    <button data-add="lamp">+ Lamp &nbsp;<span style="color:#888">(parent: desk surface)</span></button>
+    <button data-add="water">+ Water <span style="color:#888">(parent: desk, soft: chair side)</span></button>
+    <button data-add="window">+ Window <span style="color:#888">(parent: wall, reject if blocked)</span></button>
+    <button data-add="plant">+ Plant <span style="color:#888">(soft: wall, prefer corner)</span></button>
+
+    <h3>Controls</h3>
+    <label><input type="checkbox" id="show-edges" checked> Show DAG edges</label>
+    <button class="danger" id="reset">Reset scene</button>
+
+    <h3>Legend</h3>
+    <div class="legend">
+      <div><span class="swatch" style="color:#ffcc44">━</span> primary parent (hard)</div>
+      <div><span class="swatch" style="color:#44ddff">┄</span> semantic ref (soft)</div>
+      <div><span class="swatch" style="color:#fff">○</span> probe range</div>
+      <div><span class="swatch" style="color:#44ff44">━</span> probe: accepted</div>
+      <div><span class="swatch" style="color:#ff4444">━</span> probe: rejected</div>
+    </div>
+
+    <h3>DAG</h3>
+    <div id="dag" class="dag">(empty)</div>
+
+    <h3>Placement log</h3>
+    <div id="log" class="log"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const ROOM = 10;
+const canvasWrap = document.getElementById('canvas-wrap');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x141416);
+scene.fog = new THREE.Fog(0x141416, 25, 50);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+camera.position.set(11, 9, 11);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+canvasWrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1, 0);
+controls.update();
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const dl = new THREE.DirectionalLight(0xffffff, 0.7);
+dl.position.set(6, 12, 6);
+scene.add(dl);
+
+const grid = new THREE.GridHelper(ROOM, 10, 0x333344, 0x222230);
+grid.position.y = 0.01;
+scene.add(grid);
+
+function resize() {
+  const w = canvasWrap.clientWidth;
+  const h = canvasWrap.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// =========================================================
+// World state
+// =========================================================
+let nextId = 0;
+const world = [];   // { id, type, mesh, pos, size, rotY, primaryParent, softRefs, ...extra }
+const edges = [];   // { from, to, kind, line }
+
+const objById = (id) => world.find(o => o.id === id);
+
+// =========================================================
+// Mesh helpers
+// =========================================================
+function addObj({ type, color, w, h, d, pos, rotY = 0, opacity = 1, primaryParent = null, softRefs = [], extra = {} }) {
+  const id = `${type}_${String(nextId++).padStart(2, '0')}`;
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshStandardMaterial({ color, transparent: opacity < 1, opacity, roughness: 0.85 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(pos);
+  mesh.rotation.y = rotY;
+  scene.add(mesh);
+
+  const outline = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true })
+  );
+  mesh.add(outline);
+
+  const o = { id, type, mesh, pos: pos.clone(), size: { w, h, d }, rotY, primaryParent, softRefs: [...softRefs], ...extra };
+  world.push(o);
+
+  if (primaryParent) edges.push(makeEdge(o, objById(primaryParent), 'primary'));
+  for (const refId of softRefs) {
+    const ref = objById(refId);
+    if (ref) edges.push(makeEdge(o, ref, 'soft'));
+  }
+  refreshUI();
+  return o;
+}
+
+function makeEdge(from, to, kind) {
+  const color = kind === 'primary' ? 0xffcc44 : 0x44ddff;
+  const pts = [from.pos.clone(), to.pos.clone()];
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = kind === 'primary'
+    ? new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 })
+    : new THREE.LineDashedMaterial({ color, dashSize: 0.18, gapSize: 0.12, transparent: true, opacity: 0.85 });
+  const line = new THREE.Line(geo, mat);
+  if (kind === 'soft') line.computeLineDistances();
+  scene.add(line);
+  return { from: from.id, to: to.id, kind, line };
+}
+
+// =========================================================
+// Build room (floor + 4 walls)
+// =========================================================
+function buildRoom() {
+  addObj({ type: 'floor', color: 0x6b5841, w: ROOM, h: 0.05, d: ROOM, pos: new THREE.Vector3(0, -0.025, 0) });
+
+  const wallSpecs = [
+    { pos: new THREE.Vector3(0, 1.5, -ROOM / 2), w: ROOM, d: 0.1, normal: new THREE.Vector3(0, 0, 1) },
+    { pos: new THREE.Vector3(0, 1.5, ROOM / 2), w: ROOM, d: 0.1, normal: new THREE.Vector3(0, 0, -1) },
+    { pos: new THREE.Vector3(-ROOM / 2, 1.5, 0), w: 0.1, d: ROOM, normal: new THREE.Vector3(1, 0, 0) },
+    { pos: new THREE.Vector3(ROOM / 2, 1.5, 0), w: 0.1, d: ROOM, normal: new THREE.Vector3(-1, 0, 0) },
+  ];
+  for (const ws of wallSpecs) {
+    addObj({ type: 'wall', color: 0x888899, w: ws.w, h: 3, d: ws.d, pos: ws.pos, opacity: 0.35, extra: { normal: ws.normal } });
+  }
+}
+buildRoom();
+
+// =========================================================
+// Probe visualization (ephemeral)
+// =========================================================
+function showProbe(center, radius, evaluations, durationMs = 2800) {
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 24, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.12 })
+  );
+  sphere.position.copy(center);
+  scene.add(sphere);
+
+  const lines = [];
+  for (const ev of evaluations) {
+    const col = ev.accepted ? 0x44ff44 : 0xff4444;
+    const geo = new THREE.BufferGeometry().setFromPoints([center, ev.target.pos]);
+    const mat = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.9 });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    lines.push(line);
+  }
+
+  setTimeout(() => {
+    scene.remove(sphere);
+    sphere.geometry.dispose(); sphere.material.dispose();
+    for (const l of lines) {
+      scene.remove(l);
+      l.geometry.dispose(); l.material.dispose();
+    }
+  }, durationMs);
+}
+
+// =========================================================
+// Helpers
+// =========================================================
+const findInRange = (typeOrFn, center, radius) => world.filter(o => {
+  const okType = typeof typeOrFn === 'function' ? typeOrFn(o) : o.type === typeOrFn;
+  return okType && o.pos.distanceTo(center) <= radius;
+});
+
+const randomCenter = (range = 4) => new THREE.Vector3(
+  (Math.random() - 0.5) * range,
+  0.5,
+  (Math.random() - 0.5) * range
+);
+
+const log = (text) => {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = 'entry';
+  d.textContent = text;
+  el.prepend(d);
+};
+
+// =========================================================
+// Placement rules — each type encodes its own "selector"
+// =========================================================
+const PLACERS = {
+  // ---------- DESK ----------
+  desk() {
+    const range = 7;
+    const center = randomCenter(4);
+    const walls = findInRange('wall', center, range);
+    const evals = walls.map(w => ({ target: w, accepted: false }));
+    if (walls.length === 0) { showProbe(center, range, evals); log('desk: no wall in range'); return; }
+
+    walls.sort((a, b) => a.pos.distanceTo(center) - b.pos.distanceTo(center));
+    const wall = walls[0];
+    evals.find(e => e.target === wall).accepted = true;
+
+    const along = new THREE.Vector3(wall.normal.z, 0, -wall.normal.x);
+    const offset = (Math.random() - 0.5) * (ROOM - 3);
+    const pos = wall.pos.clone()
+      .setY(0.4)
+      .add(along.multiplyScalar(offset))
+      .add(wall.normal.clone().multiplyScalar(0.5));
+    const rotY = Math.atan2(wall.normal.x, wall.normal.z);
+
+    showProbe(center, range, evals);
+    const floor = world.find(o => o.type === 'floor');
+    const o = addObj({
+      type: 'desk', color: 0x8b6f47, w: 1.6, h: 0.8, d: 0.8, pos, rotY,
+      primaryParent: floor.id, softRefs: [wall.id],
+      extra: { frontDir: wall.normal.clone() }
+    });
+    log(`${o.id}: parent=${floor.id}, soft=${wall.id} (nearest wall)`);
+  },
+
+  // ---------- CHAIR ----------
+  chair() {
+    const range = 4;
+    const center = randomCenter(4);
+    const desks = findInRange('desk', center, range);
+    const evals = desks.map(d => ({ target: d, accepted: false }));
+    const floor = world.find(o => o.type === 'floor');
+
+    if (desks.length === 0) {
+      showProbe(center, range, evals);
+      const pos = new THREE.Vector3(center.x, 0.5, center.z);
+      const o = addObj({ type: 'chair', color: 0x4a6fa5, w: 0.5, h: 1.0, d: 0.5, pos, primaryParent: floor.id });
+      log(`${o.id}: parent=${floor.id} (no desk found, free placement)`);
+      return;
+    }
+    desks.sort((a, b) => a.pos.distanceTo(center) - b.pos.distanceTo(center));
+    const desk = desks[0];
+    evals.find(e => e.target === desk).accepted = true;
+
+    const front = desk.frontDir.clone();
+    const pos = desk.pos.clone().add(front.clone().multiplyScalar(0.7));
+    pos.y = 0.5;
+    const rotY = Math.atan2(-front.x, -front.z);
+
+    showProbe(center, range, evals);
+    const o = addObj({
+      type: 'chair', color: 0x4a6fa5, w: 0.5, h: 1.0, d: 0.5, pos, rotY,
+      primaryParent: floor.id, softRefs: [desk.id]
+    });
+    log(`${o.id}: parent=${floor.id}, soft=${desk.id} (facing desk)`);
+  },
+
+  // ---------- LAMP ----------
+  lamp() {
+    const range = 6;
+    const center = randomCenter(4);
+    const desks = findInRange('desk', center, range);
+    const evals = desks.map(d => ({ target: d, accepted: false }));
+    if (desks.length === 0) { showProbe(center, range, evals); log('lamp: no desk in range'); return; }
+
+    desks.sort((a, b) => a.pos.distanceTo(center) - b.pos.distanceTo(center));
+    const desk = desks[0];
+    evals.find(e => e.target === desk).accepted = true;
+
+    const back = desk.frontDir.clone().negate();
+    const pos = desk.pos.clone().add(back.multiplyScalar(0.25)).setY(0.8 + 0.4);
+
+    showProbe(center, range, evals);
+    const o = addObj({
+      type: 'lamp', color: 0xeecc44, w: 0.2, h: 0.8, d: 0.2, pos,
+      primaryParent: desk.id
+    });
+    log(`${o.id}: parent=${desk.id} (on desk surface)`);
+  },
+
+  // ---------- WATER (cross-ref to chair) ----------
+  water() {
+    const range = 6;
+    const center = randomCenter(4);
+    const desks = findInRange('desk', center, range);
+    const deskEvals = desks.map(d => ({ target: d, accepted: false }));
+    if (desks.length === 0) { showProbe(center, range, deskEvals); log('water: no desk'); return; }
+
+    desks.sort((a, b) => a.pos.distanceTo(center) - b.pos.distanceTo(center));
+    const desk = desks[0];
+    deskEvals.find(e => e.target === desk).accepted = true;
+
+    // soft ref: nearest chair to THE DESK (not to the probe center) — chair must be close to desk
+    const chairs = world.filter(o => o.type === 'chair');
+    const chairEvals = chairs.map(c => ({ target: c, accepted: false }));
+    let chair = null;
+    if (chairs.length > 0) {
+      chairs.sort((a, b) => a.pos.distanceTo(desk.pos) - b.pos.distanceTo(desk.pos));
+      const candidate = chairs[0];
+      if (candidate.pos.distanceTo(desk.pos) < 2.0) {
+        chair = candidate;
+        chairEvals.find(e => e.target === chair).accepted = true;
+      }
+    }
+
+    // bias water toward chair side if available
+    let pos;
+    if (chair) {
+      const toChair = chair.pos.clone().sub(desk.pos).setY(0).normalize();
+      pos = desk.pos.clone().add(toChair.multiplyScalar(0.45)).setY(0.8 + 0.15);
+    } else {
+      pos = desk.pos.clone().setY(0.8 + 0.15);
+    }
+
+    showProbe(center, range, [...deskEvals, ...chairEvals]);
+    const softRefs = chair ? [chair.id] : [];
+    const o = addObj({
+      type: 'water', color: 0x66ccee, w: 0.15, h: 0.3, d: 0.15, pos,
+      primaryParent: desk.id, softRefs
+    });
+    log(`${o.id}: parent=${desk.id}${chair ? `, soft=${chair.id} (chair-side bias)` : ' (no chair found)'}`);
+  },
+
+  // ---------- WINDOW (reject walls with blockers) ----------
+  window() {
+    const range = 14;
+    const center = new THREE.Vector3(0, 1.5, 0);
+    const walls = findInRange('wall', center, range);
+    const evals = walls.map(w => ({ target: w, accepted: false }));
+
+    const tallObjects = world.filter(o =>
+      ['desk', 'plant'].includes(o.type) && o.size.h > 0.5);
+
+    let chosenWall = null;
+    const rejected = [];
+    for (const wall of walls) {
+      const candidatePoint = wall.pos.clone().setY(1.5);
+      const rayDir = wall.normal.clone();
+      let blocker = null;
+      for (const obj of tallObjects) {
+        const toObj = obj.pos.clone().sub(candidatePoint);
+        const along = toObj.dot(rayDir);
+        if (along < 0 || along > 3.5) continue;
+        const perp = toObj.clone().sub(rayDir.clone().multiplyScalar(along));
+        const radius = Math.max(obj.size.w, obj.size.d) / 2 + 0.3;
+        if (perp.length() < radius) { blocker = obj; break; }
+      }
+      if (!blocker && !chosenWall) {
+        chosenWall = wall;
+        evals.find(e => e.target === wall).accepted = true;
+      } else if (blocker) {
+        rejected.push({ wall, blocker });
+        // also flag the blocker red
+        evals.push({ target: blocker, accepted: false });
+      }
+    }
+
+    showProbe(center, range, evals);
+    if (!chosenWall) { log(`window: all ${walls.length} walls blocked`); return; }
+
+    const along = new THREE.Vector3(chosenWall.normal.z, 0, -chosenWall.normal.x);
+    const offset = (Math.random() - 0.5) * (ROOM - 3);
+    const pos = chosenWall.pos.clone()
+      .setY(1.8)
+      .add(along.multiplyScalar(offset))
+      .add(chosenWall.normal.clone().multiplyScalar(0.06));
+    const rotY = Math.atan2(chosenWall.normal.x, chosenWall.normal.z);
+
+    const o = addObj({
+      type: 'window', color: 0xaaccff, w: 1.5, h: 1.0, d: 0.05, pos, rotY, opacity: 0.6,
+      primaryParent: chosenWall.id
+    });
+    const rejText = rejected.length ? ` (rejected ${rejected.length} blocked wall${rejected.length>1?'s':''})` : '';
+    log(`${o.id}: parent=${chosenWall.id}${rejText}`);
+  },
+
+  // ---------- PLANT (prefer wall corner) ----------
+  plant() {
+    const range = 6;
+    const center = randomCenter(5);
+    const walls = findInRange('wall', center, range);
+    const evals = walls.map(w => ({ target: w, accepted: false }));
+    const floor = world.find(o => o.type === 'floor');
+
+    if (walls.length === 0) {
+      showProbe(center, range, evals);
+      const o = addObj({
+        type: 'plant', color: 0x4f8a4a, w: 0.4, h: 1.2, d: 0.4,
+        pos: new THREE.Vector3(center.x, 0.6, center.z), primaryParent: floor.id
+      });
+      log(`${o.id}: parent=${floor.id} (no wall nearby)`);
+      return;
+    }
+
+    walls.sort((a, b) => a.pos.distanceTo(center) - b.pos.distanceTo(center));
+    const wall = walls[0];
+    evals.find(e => e.target === wall).accepted = true;
+
+    const along = new THREE.Vector3(wall.normal.z, 0, -wall.normal.x);
+    // 70% chance to bias toward a corner
+    const cornerBias = Math.random() < 0.7
+      ? (Math.random() < 0.5 ? -1 : 1) * (ROOM / 2 - 0.8)
+      : (Math.random() - 0.5) * (ROOM - 2);
+    const pos = wall.pos.clone()
+      .setY(0.6)
+      .add(along.multiplyScalar(cornerBias))
+      .add(wall.normal.clone().multiplyScalar(0.35));
+
+    showProbe(center, range, evals);
+    const o = addObj({
+      type: 'plant', color: 0x4f8a4a, w: 0.4, h: 1.2, d: 0.4, pos,
+      primaryParent: floor.id, softRefs: [wall.id]
+    });
+    log(`${o.id}: parent=${floor.id}, soft=${wall.id} (corner bias)`);
+  },
+};
+
+// =========================================================
+// UI wiring
+// =========================================================
+document.querySelectorAll('button[data-add]').forEach(btn => {
+  btn.addEventListener('click', () => PLACERS[btn.dataset.add]?.());
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  for (let i = world.length - 1; i >= 0; i--) {
+    const o = world[i];
+    if (o.type === 'floor' || o.type === 'wall') continue;
+    scene.remove(o.mesh);
+    o.mesh.geometry.dispose();
+    o.mesh.material.dispose();
+    world.splice(i, 1);
+  }
+  for (const e of edges) {
+    scene.remove(e.line);
+    e.line.geometry.dispose();
+    e.line.material.dispose();
+  }
+  edges.length = 0;
+  document.getElementById('log').innerHTML = '';
+  refreshUI();
+});
+
+document.getElementById('show-edges').addEventListener('change', e => {
+  for (const edge of edges) edge.line.visible = e.target.checked;
+});
+
+function refreshUI() {
+  const dagEl = document.getElementById('dag');
+  const children = {};
+  for (const o of world) {
+    const p = o.primaryParent ?? '__root';
+    (children[p] ||= []).push(o.id);
+  }
+  function recur(id, depth) {
+    const o = objById(id);
+    let line = '  '.repeat(depth) + (depth > 0 ? '└─ ' : '') + id;
+    if (o.softRefs?.length) line += '  ┄► ' + o.softRefs.join(', ');
+    let out = line + '\n';
+    for (const c of (children[id] || [])) out += recur(c, depth + 1);
+    return out;
+  }
+  let text = '';
+  for (const id of (children['__root'] || [])) text += recur(id, 0);
+  dagEl.textContent = text || '(empty)';
+}
+refreshUI();
+
+// =========================================================
+// Render loop
+// =========================================================
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
