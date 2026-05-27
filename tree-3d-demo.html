@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lethe — 3D Tree Visualizer (MVP)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; overflow: hidden; background: #0a0a0c; font-family: ui-monospace, monospace; color: #ddd; }
+  canvas { display: block; }
+  #labels { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  .node-label {
+    position: absolute; left: 0; top: 0;
+    background: rgba(10,10,15,0.85); border: 1px solid; padding: 2px 7px; border-radius: 3px;
+    font-size: 10.5px; white-space: nowrap; pointer-events: none;
+    transform: translate(-50%, -50%);
+    user-select: none; font-family: inherit;
+    transition: opacity 0.1s;
+  }
+  .node-label.picked { border-color: #4a88dd; color: #b0d8ff; }
+  .node-label.rejected { border-color: #884a4a; color: #ddaaaa; opacity: 0.55; font-style: italic; }
+  .node-label.hovered { background: #2a2a35; color: #fff; border-color: #fff; opacity: 1 !important; }
+
+  #hud {
+    position: absolute; top: 12px; left: 12px;
+    background: rgba(0,0,0,0.6); padding: 10px 14px; border-radius: 4px;
+    font-size: 11px; line-height: 1.6; color: #aaa; pointer-events: none;
+  }
+  #hud .key { color: #88aaff; }
+  #hud .title { color: #fff; font-size: 12px; margin-bottom: 4px; font-weight: 600; }
+
+  #info {
+    position: absolute; top: 12px; right: 12px; min-width: 220px;
+    background: rgba(0,0,0,0.7); padding: 10px 14px; border-radius: 4px;
+    font-size: 11px; line-height: 1.55; color: #ddd; pointer-events: none;
+  }
+  #info .title { color: #88aaff; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  #info .row { display: flex; gap: 8px; }
+  #info .key { color: #888; min-width: 70px; }
+  #info .val { color: #fff; }
+  #info .picked { color: #6cc26c; }
+  #info .rejected { color: #cc6c6c; }
+
+  #buttons {
+    position: absolute; bottom: 12px; left: 12px;
+    display: flex; gap: 8px;
+  }
+  #buttons button {
+    background: rgba(20,20,28,0.85); color: #ddd; border: 1px solid #333;
+    padding: 8px 14px; cursor: pointer; font-family: inherit; font-size: 11px; border-radius: 3px;
+  }
+  #buttons button:hover { background: #2a2a35; }
+
+  #stats {
+    position: absolute; bottom: 12px; right: 12px;
+    background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 3px;
+    font-size: 10px; color: #888; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="labels"></div>
+
+<div id="hud">
+  <div class="title">3D Tree Navigator</div>
+  <div><span class="key">W A S D</span> &nbsp;move</div>
+  <div><span class="key">Q / E</span> &nbsp;&nbsp;&nbsp;up / down</div>
+  <div><span class="key">RMB drag</span> &nbsp;look around</div>
+  <div><span class="key">Shift</span> &nbsp;&nbsp;&nbsp;&nbsp;run (3×)</div>
+  <div><span class="key">Click</span> &nbsp;&nbsp;&nbsp;&nbsp;select node</div>
+  <div><span class="key">Dbl-click</span> &nbsp;fly to node</div>
+</div>
+
+<div id="info">
+  <div class="title">Selected Node</div>
+  <div style="color: #666">(click a node)</div>
+</div>
+
+<div id="buttons">
+  <button id="regen-btn">Regenerate Tree</button>
+  <button id="center-btn">Recenter Camera</button>
+  <button id="toggle-rejected">Toggle Rejected Branches</button>
+</div>
+
+<div id="stats">— fps · — nodes</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script src="https://unpkg.com/d3-hierarchy@3"></script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ===================================================================
+// Sample tree generator — mimics what Lethe will produce
+// ===================================================================
+function generateSampleTree() {
+  let idCounter = 0;
+  const makeId = (type) => `${type}_${String(idCounter++).padStart(3, '0')}`;
+
+  const root = { id: 'world', type: 'world', label: 'World', picked: true, children: [], depth_meta: 'root' };
+
+  // Helper: add a picked child + optionally some rejected alternatives at the same fork
+  function addChild(parent, type, opts = {}) {
+    const node = {
+      id: makeId(type), type, picked: true,
+      label: `${type}_${String(idCounter).padStart(2, '0')}`,
+      children: [], parent: parent,
+      seed: Math.floor(Math.random() * 1e6),
+      judge_score: 0.7 + Math.random() * 0.3,
+    };
+    parent.children.push(node);
+    // chance of rejected alternatives at this fork
+    if (opts.branchChance && Math.random() < opts.branchChance) {
+      const altCount = 1 + Math.floor(Math.random() * 2); // 1-2 alts
+      for (let i = 0; i < altCount; i++) {
+        parent.children.push({
+          id: makeId(type + '_alt'), type: type + '_alt', picked: false,
+          label: `${type}_alt_v${i+1}`,
+          children: [], parent: parent,
+          seed: Math.floor(Math.random() * 1e6),
+          judge_score: 0.3 + Math.random() * 0.4,
+          rejected_reason: ['collision_failed', 'judge_too_low', 'theme_mismatch'][Math.floor(Math.random() * 3)],
+        });
+      }
+    }
+    return node;
+  }
+
+  // Region: village center
+  const village = addChild(root, 'region_village');
+  for (let i = 0; i < 4; i++) {
+    const house = addChild(village, 'house', { branchChance: 0.5 });
+    const furnitureCount = 3 + Math.floor(Math.random() * 3);
+    for (let j = 0; j < furnitureCount; j++) {
+      const item = ['chair', 'table', 'lamp', 'rug', 'bed'][Math.floor(Math.random() * 5)];
+      addChild(house, item, { branchChance: 0.2 });
+    }
+  }
+  addChild(village, 'well', { branchChance: 0.3 });
+  addChild(village, 'tavern', { branchChance: 0.6 });
+
+  // Region: outskirts
+  const outskirts = addChild(root, 'region_outskirts');
+  for (let i = 0; i < 3; i++) {
+    const farm = addChild(outskirts, 'farmhouse', { branchChance: 0.3 });
+    for (let j = 0; j < 2 + Math.floor(Math.random() * 3); j++) {
+      addChild(farm, 'rice_field', { branchChance: 0.15 });
+    }
+  }
+
+  // Region: wilderness
+  const wild = addChild(root, 'region_wilderness');
+  for (let i = 0; i < 10; i++) {
+    addChild(wild, 'tree', { branchChance: 0.1 });
+  }
+  for (let i = 0; i < 3; i++) {
+    addChild(wild, 'rock', { branchChance: 0.05 });
+  }
+
+  return root;
+}
+
+// ===================================================================
+// Layout: D3 tree + Z offset for rejected alternatives
+// ===================================================================
+function layoutTree(treeData) {
+  const root = d3.hierarchy(treeData);
+  // nodeSize: [horizontal spacing between siblings, vertical spacing between depth levels]
+  const layout = d3.tree().nodeSize([6, 14]);
+  layout(root);
+
+  // Assign Z: picked stays at 0, rejected alternates +/- offset based on sibling index
+  root.descendants().forEach(n => {
+    n.tx = n.x;
+    n.ty = -n.y;                  // tree grows in -Y direction
+    n.tz = 0;
+    if (!n.data.picked) {
+      // among rejected siblings sharing the same parent
+      const siblings = n.parent.children;
+      const rejected = siblings.filter(s => !s.data.picked);
+      const idx = rejected.indexOf(n);
+      const step = 5;
+      n.tz = (Math.floor(idx / 2) + 1) * step * (idx % 2 === 0 ? 1 : -1);
+    }
+  });
+  return root;
+}
+
+// ===================================================================
+// Three.js setup
+// ===================================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a0c);
+scene.fog = new THREE.Fog(0x0a0a0c, 300, 800);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+dirLight.position.set(60, 100, 60);
+scene.add(dirLight);
+
+// Reference floor grid (visual anchor)
+const grid = new THREE.GridHelper(400, 40, 0x1a1a22, 0x111118);
+grid.position.y = -100;
+scene.add(grid);
+
+// ===================================================================
+// Custom FPS controls (WASD + RMB drag look) + double-click fly-to-node
+// ===================================================================
+class FPSControls {
+  constructor(camera, dom) {
+    this.camera = camera; this.dom = dom;
+    this.keys = {}; this.isDragging = false;
+    this.lastX = 0; this.lastY = 0;
+    this.yaw = 0; this.pitch = 0;
+    this.baseSpeed = 60;
+    this._flyTo = null;             // active fly-to-node animation, if any
+    this._setup();
+  }
+  _setup() {
+    document.addEventListener('keydown', e => this.keys[e.code] = true);
+    document.addEventListener('keyup', e => this.keys[e.code] = false);
+    this.dom.addEventListener('mousedown', e => {
+      if (e.button === 2) {
+        this.isDragging = true;
+        this.lastX = e.clientX; this.lastY = e.clientY;
+        this.dom.style.cursor = 'none';
+        this._flyTo = null;         // user takes over → cancel animation
+      }
+    });
+    window.addEventListener('mouseup', e => {
+      if (e.button === 2) { this.isDragging = false; this.dom.style.cursor = ''; }
+    });
+    window.addEventListener('mousemove', e => {
+      if (!this.isDragging) return;
+      const dx = e.clientX - this.lastX;
+      const dy = e.clientY - this.lastY;
+      this.lastX = e.clientX; this.lastY = e.clientY;
+      this.yaw -= dx * 0.004;
+      this.pitch -= dy * 0.004;
+      this.pitch = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, this.pitch));
+    });
+    this.dom.addEventListener('contextmenu', e => e.preventDefault());
+  }
+  setOrientationFromCamera() {
+    const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+    this.yaw = e.y; this.pitch = e.x;
+  }
+
+  // Animate camera to look at a node from a fixed distance along current view ray
+  flyToNode(nodeWorldPos, distance = 14, duration = 550) {
+    const camPos = this.camera.position;
+    const dir = new THREE.Vector3().subVectors(nodeWorldPos, camPos);
+    if (dir.lengthSq() < 0.01) dir.set(0, -2, 10);
+    dir.normalize();
+    // target: a point on the camera's side of the node at `distance`
+    const targetPos = nodeWorldPos.clone().sub(dir.clone().multiplyScalar(distance));
+
+    // target orientation: look at the node
+    const toNode = nodeWorldPos.clone().sub(targetPos).normalize();
+    let targetYaw = Math.atan2(-toNode.x, -toNode.z);
+    let targetPitch = Math.asin(THREE.MathUtils.clamp(toNode.y, -1, 1));
+
+    // shortest yaw path (avoid 350° spin to reach 10°)
+    let dyaw = targetYaw - this.yaw;
+    while (dyaw >  Math.PI) dyaw -= Math.PI * 2;
+    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+    targetYaw = this.yaw + dyaw;
+
+    this._flyTo = {
+      startPos: camPos.clone(),
+      targetPos,
+      startYaw: this.yaw, targetYaw,
+      startPitch: this.pitch, targetPitch,
+      startTime: performance.now(),
+      duration,
+    };
+  }
+
+  update(dt) {
+    // Cancel fly-to if user starts moving manually
+    if (this._flyTo) {
+      const k = this.keys;
+      if (k.KeyW || k.KeyS || k.KeyA || k.KeyD || k.KeyQ || k.KeyE || k.Space) {
+        this._flyTo = null;
+      }
+    }
+
+    // Apply fly-to animation (ease-out cubic)
+    if (this._flyTo) {
+      const f = this._flyTo;
+      const t = Math.min(1, (performance.now() - f.startTime) / f.duration);
+      const e = 1 - Math.pow(1 - t, 3);
+      this.camera.position.lerpVectors(f.startPos, f.targetPos, e);
+      this.yaw   = f.startYaw   + (f.targetYaw   - f.startYaw)   * e;
+      this.pitch = f.startPitch + (f.targetPitch - f.startPitch) * e;
+      if (t >= 1) this._flyTo = null;
+    }
+
+    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+    const fast = this.keys.ShiftLeft || this.keys.ShiftRight;
+    const speed = this.baseSpeed * (fast ? 3 : 1);
+
+    const move = new THREE.Vector3();
+    if (this.keys.KeyW) move.add(forward);
+    if (this.keys.KeyS) move.sub(forward);
+    if (this.keys.KeyA) move.sub(right);
+    if (this.keys.KeyD) move.add(right);
+    if (this.keys.KeyE || this.keys.Space) move.y += 1;
+    if (this.keys.KeyQ) move.y -= 1;
+
+    if (move.lengthSq() > 0) {
+      move.normalize().multiplyScalar(speed * dt);
+      this.camera.position.add(move);
+    }
+  }
+}
+
+const controls = new FPSControls(camera, renderer.domElement);
+
+// ===================================================================
+// Build scene from tree
+// ===================================================================
+let treeData, root, allNodes;
+let pickedInst, rejectedInst, edgeLines;
+let nodeBundle;  // owns all THREE objects + labels for cleanup
+
+const nodeGeo = new THREE.SphereGeometry(0.9, 14, 10);
+const matPicked = new THREE.MeshStandardMaterial({ color: 0x4a88dd, roughness: 0.5 });
+const matRejected = new THREE.MeshStandardMaterial({ color: 0x885a5a, roughness: 0.7, opacity: 0.55, transparent: true });
+const matHovered = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x444466, roughness: 0.3 });
+
+function buildScene() {
+  // teardown previous
+  if (nodeBundle) {
+    scene.remove(nodeBundle.picked, nodeBundle.rejected, nodeBundle.edges);
+    nodeBundle.picked.geometry.dispose();
+    document.getElementById('labels').innerHTML = '';
+  }
+
+  treeData = generateSampleTree();
+  root = layoutTree(treeData);
+  allNodes = root.descendants();
+
+  const picked = allNodes.filter(n => n.data.picked);
+  const rejected = allNodes.filter(n => !n.data.picked);
+
+  // InstancedMesh
+  pickedInst = new THREE.InstancedMesh(nodeGeo, matPicked, picked.length);
+  rejectedInst = new THREE.InstancedMesh(nodeGeo, matRejected, rejected.length);
+
+  const m = new THREE.Matrix4();
+  picked.forEach((n, i) => {
+    m.makeTranslation(n.tx, n.ty, n.tz);
+    pickedInst.setMatrixAt(i, m);
+    n.instIndex = i; n.instGroup = 'picked';
+  });
+  rejected.forEach((n, i) => {
+    m.makeTranslation(n.tx, n.ty, n.tz);
+    rejectedInst.setMatrixAt(i, m);
+    n.instIndex = i; n.instGroup = 'rejected';
+  });
+  pickedInst.instanceMatrix.needsUpdate = true;
+  rejectedInst.instanceMatrix.needsUpdate = true;
+  scene.add(pickedInst, rejectedInst);
+
+  // Edges
+  const edgePts = []; const edgeCols = [];
+  allNodes.forEach(n => {
+    if (!n.parent) return;
+    edgePts.push(n.parent.tx, n.parent.ty, n.parent.tz, n.tx, n.ty, n.tz);
+    const c = n.data.picked ? [0.35, 0.6, 1.0] : [0.55, 0.35, 0.35];
+    edgeCols.push(...c, ...c);
+  });
+  const edgeGeo = new THREE.BufferGeometry();
+  edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePts, 3));
+  edgeGeo.setAttribute('color', new THREE.Float32BufferAttribute(edgeCols, 3));
+  edgeLines = new THREE.LineSegments(edgeGeo,
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.65 }));
+  scene.add(edgeLines);
+
+  // Labels
+  const labelsEl = document.getElementById('labels');
+  allNodes.forEach(n => {
+    const div = document.createElement('div');
+    div.className = 'node-label ' + (n.data.picked ? 'picked' : 'rejected');
+    div.textContent = n.data.label;
+    labelsEl.appendChild(div);
+    n.labelEl = div;
+  });
+
+  nodeBundle = { picked: pickedInst, rejected: rejectedInst, edges: edgeLines };
+
+  // stats
+  document.getElementById('stats').textContent =
+    `— fps · ${allNodes.length} nodes (${picked.length} picked, ${rejected.length} rejected)`;
+
+  recenterCamera();
+}
+
+// ===================================================================
+// Camera framing
+// ===================================================================
+function recenterCamera() {
+  const box = new THREE.Box3();
+  allNodes.forEach(n => box.expandByPoint(new THREE.Vector3(n.tx, n.ty, n.tz)));
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z) * 0.9;
+
+  camera.position.set(center.x, center.y + maxDim * 0.4, maxDim * 1.1);
+  camera.lookAt(center);
+  controls.setOrientationFromCamera();
+}
+
+// ===================================================================
+// Label projection (every frame, viewport visible only)
+// ===================================================================
+const projV = new THREE.Vector3();
+function updateLabels() {
+  const w = innerWidth, h = innerHeight;
+  for (const n of allNodes) {
+    projV.set(n.tx, n.ty, n.tz);
+    projV.project(camera);
+    // behind camera or off-screen
+    if (projV.z < -1 || projV.z > 1 || Math.abs(projV.x) > 1.2 || Math.abs(projV.y) > 1.2) {
+      n.labelEl.style.display = 'none';
+      continue;
+    }
+    // depth-based opacity (farther = fainter)
+    const depth = projV.z;
+    const opacity = 1.0 - depth * 0.8;
+    n.labelEl.style.display = '';
+    n.labelEl.style.left = ((projV.x * 0.5 + 0.5) * w) + 'px';
+    n.labelEl.style.top = ((-projV.y * 0.5 + 0.5) * h) + 'px';
+    n.labelEl.style.opacity = Math.max(0.2, Math.min(1, opacity));
+  }
+}
+
+// ===================================================================
+// Click / hover handling (raycaster, brute-force for prototype)
+// ===================================================================
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let hoveredNode = null;
+let selectedNode = null;
+
+function pickNode(clientX, clientY) {
+  mouse.x = (clientX / innerWidth) * 2 - 1;
+  mouse.y = -(clientY / innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  let best = null, bestT = Infinity;
+  const tmp = new THREE.Vector3();
+  for (const n of allNodes) {
+    tmp.set(n.tx, n.ty, n.tz);
+    const distSq = raycaster.ray.distanceSqToPoint(tmp);
+    if (distSq < 2.0) {
+      const t = raycaster.ray.origin.distanceTo(tmp);
+      if (t < bestT) { best = n; bestT = t; }
+    }
+  }
+  return best;
+}
+
+renderer.domElement.addEventListener('mousemove', e => {
+  if (controls.isDragging) return;
+  const n = pickNode(e.clientX, e.clientY);
+  if (n !== hoveredNode) {
+    if (hoveredNode) hoveredNode.labelEl.classList.remove('hovered');
+    hoveredNode = n;
+    if (hoveredNode) hoveredNode.labelEl.classList.add('hovered');
+    renderer.domElement.style.cursor = n ? 'pointer' : '';
+  }
+});
+
+renderer.domElement.addEventListener('click', e => {
+  if (controls.isDragging) return;
+  const n = pickNode(e.clientX, e.clientY);
+  if (n) selectNode(n);
+});
+
+// Double-click → fly camera to that node
+renderer.domElement.addEventListener('dblclick', e => {
+  if (controls.isDragging) return;
+  const n = pickNode(e.clientX, e.clientY);
+  if (!n) return;
+  const nodePos = new THREE.Vector3(n.tx, n.ty, n.tz);
+  controls.flyToNode(nodePos);
+  selectNode(n);   // also select for info panel
+});
+
+function selectNode(n) {
+  selectedNode = n;
+  const infoEl = document.getElementById('info');
+  const d = n.data;
+  const ancestors = n.ancestors().reverse().map(a => a.data.label).join(' › ');
+  infoEl.innerHTML = `
+    <div class="title">Selected Node</div>
+    <div class="row"><span class="key">id</span><span class="val">${d.id}</span></div>
+    <div class="row"><span class="key">type</span><span class="val">${d.type}</span></div>
+    <div class="row"><span class="key">status</span><span class="val ${d.picked ? 'picked' : 'rejected'}">${d.picked ? '✓ picked' : '✗ rejected'}</span></div>
+    ${d.judge_score !== undefined ? `<div class="row"><span class="key">judge</span><span class="val">${d.judge_score.toFixed(2)}</span></div>` : ''}
+    ${d.seed !== undefined ? `<div class="row"><span class="key">seed</span><span class="val">${d.seed}</span></div>` : ''}
+    ${d.rejected_reason ? `<div class="row"><span class="key">reason</span><span class="val">${d.rejected_reason}</span></div>` : ''}
+    <div class="row"><span class="key">depth</span><span class="val">${n.depth}</span></div>
+    <div class="row"><span class="key">children</span><span class="val">${(n.children || []).length}</span></div>
+    <div class="row"><span class="key">descendants</span><span class="val">${n.descendants().length - 1}</span></div>
+    <hr style="border:none;border-top:1px solid #2a2a30;margin:8px 0">
+    <div style="font-size:10px;color:#888;line-height:1.4">${ancestors}</div>
+  `;
+  // Console: this is where MCP WebSocket will eventually send "navigate to node X"
+  console.log('[click]', d.id, '→ (future) UE will load actors for this subtree state');
+}
+
+// ===================================================================
+// Buttons
+// ===================================================================
+document.getElementById('regen-btn').addEventListener('click', buildScene);
+document.getElementById('center-btn').addEventListener('click', recenterCamera);
+let rejectedVisible = true;
+document.getElementById('toggle-rejected').addEventListener('click', () => {
+  rejectedVisible = !rejectedVisible;
+  rejectedInst.visible = rejectedVisible;
+  edgeLines.material.opacity = rejectedVisible ? 0.65 : 0.85;
+  // hide rejected labels
+  allNodes.forEach(n => { if (!n.data.picked) n.labelEl.style.visibility = rejectedVisible ? '' : 'hidden'; });
+});
+
+// ===================================================================
+// Resize
+// ===================================================================
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ===================================================================
+// Animate loop with FPS counter
+// ===================================================================
+const clock = new THREE.Clock();
+let fpsCount = 0, fpsTimer = 0, currentFps = 60;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+
+  controls.update(dt);
+  updateLabels();
+  renderer.render(scene, camera);
+
+  fpsCount++; fpsTimer += dt;
+  if (fpsTimer >= 0.5) {
+    currentFps = Math.round(fpsCount / fpsTimer);
+    document.getElementById('stats').textContent =
+      `${currentFps} fps · ${allNodes.length} nodes`;
+    fpsCount = 0; fpsTimer = 0;
+  }
+}
+
+// ===================================================================
+// Boot
+// ===================================================================
+buildScene();
+animate();
+</script>
+</body>
+</html>
