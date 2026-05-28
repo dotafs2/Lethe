@@ -55,6 +55,24 @@
     background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 3px;
     font-size: 10px; color: #888; pointer-events: none;
   }
+
+  #ws-status {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.7); padding: 6px 14px; border-radius: 14px;
+    font-size: 11px; color: #888; pointer-events: none;
+  }
+  #ws-status.connected { color: #6cc26c; }
+  #ws-status.error     { color: #cc6c6c; }
+
+  .node-label.ue-selected {
+    background: #5a3a05 !important;
+    border-color: #ffaa00 !important;
+    color: #ffe080 !important;
+    box-shadow: 0 0 10px rgba(255, 170, 0, 0.6);
+    font-weight: 600;
+    opacity: 1 !important;
+    z-index: 10;
+  }
 </style>
 </head>
 <body>
@@ -77,12 +95,14 @@
 </div>
 
 <div id="buttons">
-  <button id="regen-btn">Regenerate Tree</button>
+  <button id="refresh-btn">Refresh from UE</button>
+  <button id="regen-btn">Use Sample Tree</button>
   <button id="center-btn">Recenter Camera</button>
-  <button id="toggle-rejected">Toggle Rejected Branches</button>
+  <button id="toggle-rejected">Toggle Rejected</button>
 </div>
 
 <div id="stats">— fps · — nodes</div>
+<div id="ws-status">● not connected</div>
 
 <script type="importmap">
 {
@@ -164,6 +184,43 @@ function generateSampleTree() {
   }
 
   return root;
+}
+
+// ===================================================================
+// Build hierarchy tree from UE flat actor list
+//   each actor record: { name, label, parent, mesh, location, rotation }
+// ===================================================================
+function buildTreeFromUE(actors) {
+  if (!actors || actors.length === 0) {
+    return { id: '__world__', type: 'world', label: 'World (empty — no actors)', picked: true, children: [] };
+  }
+  const byName = {};
+  for (const a of actors) {
+    byName[a.name] = {
+      id: a.name,
+      type: 'static_mesh',
+      label: a.label || a.name,
+      picked: true,
+      children: [],
+      ue: a,                              // keep original UE data for the info panel
+    };
+  }
+  const roots = [];
+  for (const a of actors) {
+    const node = byName[a.name];
+    if (a.parent && byName[a.parent]) {
+      byName[a.parent].children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  // wrap multiple roots in a virtual world node
+  return {
+    id: '__world__', type: 'world',
+    label: `World (${actors.length} actor${actors.length === 1 ? '' : 's'})`,
+    picked: true,
+    children: roots,
+  };
 }
 
 // ===================================================================
@@ -346,17 +403,37 @@ const matPicked = new THREE.MeshStandardMaterial({ color: 0x4a88dd, roughness: 0
 const matRejected = new THREE.MeshStandardMaterial({ color: 0x885a5a, roughness: 0.7, opacity: 0.55, transparent: true });
 const matHovered = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x444466, roughness: 0.3 });
 
-function buildScene() {
+// UE-selection highlight: a glowing wireframe sphere that floats over the selected node
+const highlightGeo = new THREE.SphereGeometry(1.6, 24, 16);
+const highlightMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, wireframe: true, transparent: true, opacity: 0.8 });
+const highlightMesh = new THREE.Mesh(highlightGeo, highlightMat);
+highlightMesh.visible = false;
+scene.add(highlightMesh);
+
+// Tracking: which nodes are currently selected in UE
+const ueSelectedNodes = [];
+const nodeByActorName = new Map();   // UE actor name → tree node
+
+function buildScene(treeInput) {
   // teardown previous
   if (nodeBundle) {
     scene.remove(nodeBundle.picked, nodeBundle.rejected, nodeBundle.edges);
     nodeBundle.picked.geometry.dispose();
     document.getElementById('labels').innerHTML = '';
   }
+  // clear any UE-selection highlight
+  if (highlightMesh) highlightMesh.visible = false;
+  ueSelectedNodes.length = 0;
 
-  treeData = generateSampleTree();
+  treeData = treeInput || generateSampleTree();
   root = layoutTree(treeData);
   allNodes = root.descendants();
+
+  // Build a name → node map for O(1) lookup on selection messages
+  nodeByActorName.clear();
+  for (const n of allNodes) {
+    if (n.data.ue && n.data.ue.name) nodeByActorName.set(n.data.ue.name, n);
+  }
 
   const picked = allNodes.filter(n => n.data.picked);
   const rejected = allNodes.filter(n => !n.data.picked);
@@ -508,18 +585,31 @@ renderer.domElement.addEventListener('dblclick', e => {
   selectNode(n);   // also select for info panel
 });
 
-function selectNode(n) {
+function selectNode(n, sourceIsUE = false) {
   selectedNode = n;
   const infoEl = document.getElementById('info');
   const d = n.data;
   const ancestors = n.ancestors().reverse().map(a => a.data.label).join(' › ');
+
+  // Build info HTML — branch on whether this is a UE actor vs sample data
+  let ueRows = '';
+  if (d.ue) {
+    const loc = d.ue.location || [0, 0, 0];
+    const meshShort = d.ue.mesh ? d.ue.mesh.split('.').pop() : '—';
+    ueRows = `
+      <div class="row"><span class="key">actor</span><span class="val">${d.ue.name}</span></div>
+      <div class="row"><span class="key">mesh</span><span class="val" title="${d.ue.mesh || ''}">${meshShort}</span></div>
+      <div class="row"><span class="key">location</span><span class="val">${loc.map(v => v.toFixed(0)).join(', ')}</span></div>
+    `;
+  }
+
   infoEl.innerHTML = `
     <div class="title">Selected Node</div>
-    <div class="row"><span class="key">id</span><span class="val">${d.id}</span></div>
+    <div class="row"><span class="key">label</span><span class="val">${d.label}</span></div>
     <div class="row"><span class="key">type</span><span class="val">${d.type}</span></div>
-    <div class="row"><span class="key">status</span><span class="val ${d.picked ? 'picked' : 'rejected'}">${d.picked ? '✓ picked' : '✗ rejected'}</span></div>
+    ${ueRows}
+    ${d.picked !== undefined ? `<div class="row"><span class="key">status</span><span class="val ${d.picked ? 'picked' : 'rejected'}">${d.picked ? '✓ picked' : '✗ rejected'}</span></div>` : ''}
     ${d.judge_score !== undefined ? `<div class="row"><span class="key">judge</span><span class="val">${d.judge_score.toFixed(2)}</span></div>` : ''}
-    ${d.seed !== undefined ? `<div class="row"><span class="key">seed</span><span class="val">${d.seed}</span></div>` : ''}
     ${d.rejected_reason ? `<div class="row"><span class="key">reason</span><span class="val">${d.rejected_reason}</span></div>` : ''}
     <div class="row"><span class="key">depth</span><span class="val">${n.depth}</span></div>
     <div class="row"><span class="key">children</span><span class="val">${(n.children || []).length}</span></div>
@@ -527,15 +617,47 @@ function selectNode(n) {
     <hr style="border:none;border-top:1px solid #2a2a30;margin:8px 0">
     <div style="font-size:10px;color:#888;line-height:1.4">${ancestors}</div>
   `;
-  // Console: this is where MCP WebSocket will eventually send "navigate to node X"
-  console.log('[click]', d.id, '→ (future) UE will load actors for this subtree state');
+
+  // Forward selection to UE — only when user clicked from browser (not echo from UE)
+  if (!sourceIsUE && d.ue && d.ue.name && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'select', name: d.ue.name }));
+  }
+}
+
+// Handle a selection event coming FROM UE (push from ws_server)
+function setUESelected(actorNames) {
+  // clear previous highlights
+  for (const n of ueSelectedNodes) n.labelEl.classList.remove('ue-selected');
+  ueSelectedNodes.length = 0;
+
+  const set = new Set(actorNames || []);
+  for (const name of set) {
+    const n = nodeByActorName.get(name);
+    if (n) {
+      n.labelEl.classList.add('ue-selected');
+      ueSelectedNodes.push(n);
+    }
+  }
+
+  // 3D highlight ring on the first selected
+  if (ueSelectedNodes.length > 0) {
+    const n = ueSelectedNodes[0];
+    highlightMesh.position.set(n.tx, n.ty, n.tz);
+    highlightMesh.visible = true;
+    selectNode(n, /*sourceIsUE=*/ true);
+  } else {
+    highlightMesh.visible = false;
+  }
 }
 
 // ===================================================================
 // Buttons
 // ===================================================================
-document.getElementById('regen-btn').addEventListener('click', buildScene);
+document.getElementById('regen-btn').addEventListener('click', () => buildScene(null));
 document.getElementById('center-btn').addEventListener('click', recenterCamera);
+document.getElementById('refresh-btn').addEventListener('click', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'refresh' }));
+});
 let rejectedVisible = true;
 document.getElementById('toggle-rejected').addEventListener('click', () => {
   rejectedVisible = !rejectedVisible;
@@ -565,6 +687,14 @@ function animate() {
   const dt = Math.min(0.05, clock.getDelta());
 
   controls.update(dt);
+
+  // Pulsing highlight on UE selection
+  if (highlightMesh.visible) {
+    const t = performance.now() * 0.003;
+    highlightMesh.rotation.y += dt * 0.6;
+    highlightMesh.scale.setScalar(1 + Math.sin(t) * 0.12);
+  }
+
   updateLabels();
   renderer.render(scene, camera);
 
@@ -578,10 +708,54 @@ function animate() {
 }
 
 // ===================================================================
+// WebSocket bridge to ws_server.py
+// ===================================================================
+let ws = null;
+const statusEl = document.getElementById('ws-status');
+
+function setStatus(text, cls = '') {
+  statusEl.textContent = text;
+  statusEl.className = cls;
+}
+
+function connectWS() {
+  // If the page is served from ws_server itself, use same host; otherwise localhost.
+  const host = location.host || 'localhost:8765';
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  setStatus('● connecting…');
+  try {
+    ws = new WebSocket(`${proto}://${host}/ws`);
+  } catch (e) {
+    setStatus('● error', 'error');
+    setTimeout(connectWS, 3000);
+    return;
+  }
+  ws.onopen = () => setStatus('● connected to UE', 'connected');
+  ws.onclose = () => {
+    setStatus('● disconnected — retrying', 'error');
+    setTimeout(connectWS, 2500);
+  };
+  ws.onerror = () => setStatus('● ws error', 'error');
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.type === 'tree') {
+      buildScene(buildTreeFromUE(msg.data));
+    } else if (msg.type === 'selection') {
+      setUESelected(msg.data);
+    }
+  };
+}
+
+// ===================================================================
 // Boot
 // ===================================================================
+// Start with sample tree so the page is useful even without a backend
 buildScene();
 animate();
+
+// Try to connect — if ws_server is running, it'll replace the tree with real UE data
+connectWS();
 </script>
 </body>
 </html>

@@ -8,10 +8,15 @@ license = {text = "MIT"}
 dependencies = [
     "mcp[cli]>=1.3.0",
     "Pillow>=10.0",
+    "anthropic>=0.40.0",
+    "duckduckgo-search>=6.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
 ]
 
 [project.scripts]
 lethe = "lethe.server:main"
+lethe-ws = "lethe.ws_server:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
