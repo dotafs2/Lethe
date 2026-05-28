@@ -87,6 +87,7 @@
   <div><span class="key">Shift</span> &nbsp;&nbsp;&nbsp;&nbsp;run (3×)</div>
   <div><span class="key">Click</span> &nbsp;&nbsp;&nbsp;&nbsp;select node</div>
   <div><span class="key">Dbl-click</span> &nbsp;fly to node</div>
+  <div><span class="key">F</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;focus selected (UE-style)</div>
 </div>
 
 <div id="info">
@@ -623,6 +624,17 @@ function selectNode(n, sourceIsUE = false) {
     ws.send(JSON.stringify({ type: 'select', name: d.ue.name }));
   }
 }
+
+// F-key focus on selected node (matches UE editor's Focus Selection shortcut)
+window.addEventListener('keydown', e => {
+  if (e.repeat) return;
+  if (e.code !== 'KeyF') return;
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (!selectedNode) return;
+  const p = new THREE.Vector3(selectedNode.tx, selectedNode.ty, selectedNode.tz);
+  controls.flyToNode(p);
+});
 
 // Handle a selection event coming FROM UE (push from ws_server)
 function setUESelected(actorNames) {
