@@ -102,6 +102,14 @@ names = [a.get_name() for a in sel if isinstance(a, unreal.StaticMeshActor)]
 print("__LETHE_JSON__" + json.dumps(names))
 """
 
+# Cheap count check — just an integer, fits in UDP easily
+GET_ACTOR_COUNT_SCRIPT = r"""
+import unreal, json
+sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+n = sum(1 for a in sub.get_all_level_actors() if isinstance(a, unreal.StaticMeshActor))
+print("__LETHE_JSON__" + json.dumps(n))
+"""
+
 SELECT_BY_NAME_TMPL = r"""
 import unreal
 sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
@@ -140,14 +148,20 @@ def _extract_json(output: str) -> Any:
     return None
 
 
+# UE Remote Execution is a single-channel UDP protocol and cannot handle
+# concurrent calls — responses get interleaved / dropped. Serialize all calls.
+_ue_lock = asyncio.Lock()
+
+
 async def query_ue(code: str) -> Any:
     """Run Python in UE, parse the `__LETHE_JSON__<json>` line."""
     loop = asyncio.get_event_loop()
-    try:
-        output = await loop.run_in_executor(None, _run_in_ue, code)
-    except Exception as e:
-        logger.error(f"UE call failed: {e}")
-        return None
+    async with _ue_lock:
+        try:
+            output = await loop.run_in_executor(None, _run_in_ue, code)
+        except Exception as e:
+            logger.error(f"UE call failed: {e}")
+            return None
     return _extract_json(output or "")
 
 
@@ -164,11 +178,12 @@ async def fetch_tree() -> list[dict]:
     script = GET_TREE_SCRIPT_TMPL.replace("{path}", bridge_path)
 
     loop = asyncio.get_event_loop()
-    try:
-        output = await loop.run_in_executor(None, _run_in_ue, script)
-    except Exception as e:
-        logger.error(f"UE call failed (fetch_tree): {e}")
-        return []
+    async with _ue_lock:
+        try:
+            output = await loop.run_in_executor(None, _run_in_ue, script)
+        except Exception as e:
+            logger.error(f"UE call failed (fetch_tree): {e}")
+            return []
 
     # Sanity check: the marker should appear
     if "__LETHE_OK__" not in (output or ""):
@@ -192,6 +207,11 @@ async def fetch_tree() -> list[dict]:
 async def fetch_selection() -> set[str]:
     data = await query_ue(GET_SELECTION_SCRIPT)
     return set(data) if isinstance(data, list) else set()
+
+
+async def fetch_actor_count() -> int | None:
+    data = await query_ue(GET_ACTOR_COUNT_SCRIPT)
+    return int(data) if isinstance(data, int) else None
 
 
 # ----------------------------------------------------------------------------
@@ -251,22 +271,40 @@ async def ws_endpoint(ws: WebSocket):
 
 
 # ----------------------------------------------------------------------------
-# Selection polling loop
+# Polling loop — selection every 400ms, actor-count every ~1.6s
 # ----------------------------------------------------------------------------
 
-async def selection_loop():
+async def poll_loop():
     global _last_selection
+    last_count: int | None = None
+    tick = 0
     while True:
         await asyncio.sleep(0.4)
+        tick += 1
         if not clients:
             continue
+
+        # Selection (cheap, every tick)
         try:
             sel = await fetch_selection()
         except Exception:
-            continue
-        if sel != _last_selection:
+            sel = None
+        if sel is not None and sel != _last_selection:
             _last_selection = sel
             await broadcast({"type": "selection", "data": list(sel)})
+
+        # Actor count change → fresh tree (~ every 1.6s)
+        if tick % 4 == 0:
+            try:
+                count = await fetch_actor_count()
+            except Exception:
+                count = None
+            if count is not None and count != last_count:
+                if last_count is not None:
+                    logger.info(f"actor count {last_count} -> {count}, refreshing tree")
+                last_count = count
+                tree = await fetch_tree()
+                await broadcast({"type": "tree", "data": tree})
 
 
 # ----------------------------------------------------------------------------
@@ -291,7 +329,7 @@ async def on_startup():
         logger.info("Connected to UE editor")
     except Exception as e:
         logger.warning(f"UE not reachable on startup: {e} (will retry on each query)")
-    asyncio.create_task(selection_loop())
+    asyncio.create_task(poll_loop())
 
 
 # ----------------------------------------------------------------------------
