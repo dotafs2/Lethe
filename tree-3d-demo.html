@@ -56,6 +56,14 @@
     font-size: 10px; color: #888; pointer-events: none;
   }
 
+  #speed-indicator {
+    position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.78); padding: 8px 18px; border-radius: 4px;
+    font-size: 12px; color: #88aaff; opacity: 0; transition: opacity 0.2s;
+    pointer-events: none; letter-spacing: 1px;
+  }
+  #speed-indicator.visible { opacity: 1; }
+
   #ws-status {
     position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
     background: rgba(0,0,0,0.7); padding: 6px 14px; border-radius: 14px;
@@ -84,11 +92,12 @@
   <div><span class="key">W A S D</span> &nbsp;move</div>
   <div><span class="key">Q / E</span> &nbsp;&nbsp;&nbsp;up / down</div>
   <div><span class="key">RMB drag</span> &nbsp;look around</div>
-  <div><span class="key">Shift</span> &nbsp;&nbsp;&nbsp;&nbsp;run (3×)</div>
+  <div><span class="key">Scroll</span> &nbsp;&nbsp;&nbsp;speed (1–8)</div>
   <div><span class="key">Click</span> &nbsp;&nbsp;&nbsp;&nbsp;select node</div>
   <div><span class="key">Dbl-click</span> &nbsp;fly to node</div>
-  <div><span class="key">F</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;focus selected (UE-style)</div>
+  <div><span class="key">F</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;focus selected</div>
 </div>
+<div id="speed-indicator">Camera Speed: 4 / 8</div>
 
 <div id="info">
   <div class="title">Selected Node</div>
@@ -283,9 +292,13 @@ class FPSControls {
     this.lastX = 0; this.lastY = 0;
     this.yaw = 0; this.pitch = 0;
     this.baseSpeed = 60;
+    this.speedLevel = 4;            // UE-style speed step 1..8, default 4 = 1×
+    this.onSpeedChange = null;      // optional callback for UI
     this._flyTo = null;             // active fly-to-node animation, if any
     this._setup();
   }
+  // each step ≈ ×1.6 — close to UE editor's "Camera Speed" steps
+  get speedMultiplier() { return Math.pow(1.6, this.speedLevel - 4); }
   _setup() {
     document.addEventListener('keydown', e => this.keys[e.code] = true);
     document.addEventListener('keyup', e => this.keys[e.code] = false);
@@ -310,6 +323,15 @@ class FPSControls {
       this.pitch = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, this.pitch));
     });
     this.dom.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Scroll wheel adjusts camera speed level (UE-style)
+    this.dom.addEventListener('wheel', e => {
+      e.preventDefault();
+      const prev = this.speedLevel;
+      if (e.deltaY < 0) this.speedLevel = Math.min(8, this.speedLevel + 1);
+      else if (e.deltaY > 0) this.speedLevel = Math.max(1, this.speedLevel - 1);
+      if (this.speedLevel !== prev && this.onSpeedChange) this.onSpeedChange(this.speedLevel);
+    }, { passive: false });
   }
   setOrientationFromCamera() {
     const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
@@ -372,8 +394,7 @@ class FPSControls {
     this.camera.getWorldDirection(forward);
     const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
 
-    const fast = this.keys.ShiftLeft || this.keys.ShiftRight;
-    const speed = this.baseSpeed * (fast ? 3 : 1);
+    const speed = this.baseSpeed * this.speedMultiplier;
 
     const move = new THREE.Vector3();
     if (this.keys.KeyW) move.add(forward);
@@ -391,6 +412,16 @@ class FPSControls {
 }
 
 const controls = new FPSControls(camera, renderer.domElement);
+
+// Transient camera-speed indicator (UE-style)
+const speedIndicatorEl = document.getElementById('speed-indicator');
+let _speedIndTimer = null;
+controls.onSpeedChange = (lvl) => {
+  speedIndicatorEl.textContent = `Camera Speed: ${lvl} / 8`;
+  speedIndicatorEl.classList.add('visible');
+  clearTimeout(_speedIndTimer);
+  _speedIndTimer = setTimeout(() => speedIndicatorEl.classList.remove('visible'), 1300);
+};
 
 // ===================================================================
 // Build scene from tree
