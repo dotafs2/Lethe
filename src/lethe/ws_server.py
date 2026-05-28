@@ -21,7 +21,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import pathlib
+import tempfile
 from typing import Any
 
 import uvicorn
@@ -30,6 +32,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from .server import _run_in_ue, _ensure_connected
+
+# Temp file UE writes large JSON payloads to (UE Remote Execution UDP can't carry
+# more than ~1.5KB reliably, so anything bigger goes via filesystem)
+_BRIDGE_FILE = pathlib.Path(tempfile.gettempdir()) / "lethe_bridge.json"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("lethe-ws")
@@ -52,7 +58,7 @@ _last_selection: set[str] = set()
 # UE-side scripts (run via Remote Execution)
 # ----------------------------------------------------------------------------
 
-GET_TREE_SCRIPT = r"""
+GET_TREE_SCRIPT_TMPL = r"""
 import unreal, json
 sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 actors = sub.get_all_level_actors()
@@ -82,7 +88,10 @@ for a in sma:
         "location": [loc.x, loc.y, loc.z],
         "rotation": [rot.pitch, rot.yaw, rot.roll],
     })
-print("__LETHE_JSON__" + json.dumps(out))
+# UE Remote Execution UDP can't reliably carry >1.5KB. Write to disk instead.
+with open(r"{path}", "w", encoding="utf-8") as f:
+    json.dump(out, f)
+print("__LETHE_OK__" + str(len(out)))
 """
 
 GET_SELECTION_SCRIPT = r"""
@@ -143,8 +152,41 @@ async def query_ue(code: str) -> Any:
 
 
 async def fetch_tree() -> list[dict]:
-    data = await query_ue(GET_TREE_SCRIPT)
-    return data if isinstance(data, list) else []
+    """Get actor tree by having UE write JSON to disk (UDP can't carry it)."""
+    # Clean up any stale file before asking UE to write a new one
+    try:
+        _BRIDGE_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    # Have UE write JSON to _BRIDGE_FILE, then print just the count
+    bridge_path = str(_BRIDGE_FILE).replace("\\", "/")
+    script = GET_TREE_SCRIPT_TMPL.replace("{path}", bridge_path)
+
+    loop = asyncio.get_event_loop()
+    try:
+        output = await loop.run_in_executor(None, _run_in_ue, script)
+    except Exception as e:
+        logger.error(f"UE call failed (fetch_tree): {e}")
+        return []
+
+    # Sanity check: the marker should appear
+    if "__LETHE_OK__" not in (output or ""):
+        logger.warning(f"fetch_tree: no OK marker. output preview: {(output or '')[:200]}")
+        return []
+
+    # Read the file UE just wrote
+    if not _BRIDGE_FILE.exists():
+        logger.warning(f"fetch_tree: bridge file missing at {_BRIDGE_FILE}")
+        return []
+    try:
+        with open(_BRIDGE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        logger.info(f"fetch_tree: {len(data)} actors loaded from {_BRIDGE_FILE}")
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        logger.error(f"fetch_tree: file read/parse failed: {e}")
+        return []
 
 
 async def fetch_selection() -> set[str]:
