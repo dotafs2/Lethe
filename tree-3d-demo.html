@@ -238,24 +238,42 @@ function buildTreeFromUE(actors) {
 // ===================================================================
 function layoutTree(treeData) {
   const root = d3.hierarchy(treeData);
-  // nodeSize: [horizontal spacing between siblings, vertical spacing between depth levels]
-  const layout = d3.tree().nodeSize([6, 14]);
-  layout(root);
+  const count = root.descendants().length;
 
-  // Assign Z: picked stays at 0, rejected alternates +/- offset based on sibling index
-  root.descendants().forEach(n => {
-    n.tx = n.x;
-    n.ty = -n.y;                  // tree grows in -Y direction
-    n.tz = 0;
-    if (!n.data.picked) {
-      // among rejected siblings sharing the same parent
-      const siblings = n.parent.children;
-      const rejected = siblings.filter(s => !s.data.picked);
-      const idx = rejected.indexOf(n);
-      const step = 5;
-      n.tz = (Math.floor(idx / 2) + 1) * step * (idx % 2 === 0 ? 1 : -1);
-    }
-  });
+  if (count > 120) {
+    // ---- RADIAL layout for big, wide-shallow trees ----
+    // root at center; depth = ring radius; siblings spread around the circle.
+    // A wide-shallow tree (many top anchors, few levels) becomes a readable
+    // disc instead of a flat horizontal bar.
+    const layout = d3.tree()
+      .size([2 * Math.PI, 1])
+      .separation((a, b) => (a.parent === b.parent ? 1 : 2) / Math.max(1, a.depth));
+    layout(root);
+    const RING = 130;            // world units between depth rings
+    root.descendants().forEach(n => {
+      const angle = n.x;         // 0..2π
+      const radius = n.depth * RING;
+      n.tx = Math.cos(angle) * radius;
+      n.ty = Math.sin(angle) * radius;
+      n.tz = 0;
+    });
+  } else {
+    // ---- LINEAR layout for small trees (keeps rejected-branch Z encoding) ----
+    const layout = d3.tree().nodeSize([6, 14]);
+    layout(root);
+    root.descendants().forEach(n => {
+      n.tx = n.x;
+      n.ty = -n.y;               // tree grows in -Y direction
+      n.tz = 0;
+      if (!n.data.picked) {
+        const siblings = n.parent.children;
+        const rejected = siblings.filter(s => !s.data.picked);
+        const idx = rejected.indexOf(n);
+        const step = 5;
+        n.tz = (Math.floor(idx / 2) + 1) * step * (idx % 2 === 0 ? 1 : -1);
+      }
+    });
+  }
   return root;
 }
 
@@ -266,7 +284,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a0c);
 scene.fog = new THREE.Fog(0x0a0a0c, 300, 800);
 
-const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 2000);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 60000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(devicePixelRatio);
@@ -429,6 +447,7 @@ controls.onSpeedChange = (lvl) => {
 let treeData, root, allNodes;
 let pickedInst, rejectedInst, edgeLines;
 let nodeBundle;  // owns all THREE objects + labels for cleanup
+let nodeScale = 1;  // per-tree node-sphere scale (large trees → bigger spheres)
 
 const nodeGeo = new THREE.SphereGeometry(0.9, 14, 10);
 const matPicked = new THREE.MeshStandardMaterial({ color: 0x4a88dd, roughness: 0.5 });
@@ -470,18 +489,30 @@ function buildScene(treeInput) {
   const picked = allNodes.filter(n => n.data.picked);
   const rejected = allNodes.filter(n => !n.data.picked);
 
+  // Node size scales with tree extent so large trees stay visible from afar
+  const _bb = new THREE.Box3();
+  allNodes.forEach(n => _bb.expandByPoint(new THREE.Vector3(n.tx, n.ty, n.tz)));
+  const _sz = new THREE.Vector3(); _bb.getSize(_sz);
+  const _maxDim = Math.max(_sz.x, _sz.y, _sz.z) || 50;
+  nodeScale = Math.max(1, _maxDim / 180);
+
   // InstancedMesh
   pickedInst = new THREE.InstancedMesh(nodeGeo, matPicked, picked.length);
   rejectedInst = new THREE.InstancedMesh(nodeGeo, matRejected, rejected.length);
 
   const m = new THREE.Matrix4();
+  const _s = new THREE.Vector3(nodeScale, nodeScale, nodeScale);
+  const _q = new THREE.Quaternion();
+  const _p = new THREE.Vector3();
   picked.forEach((n, i) => {
-    m.makeTranslation(n.tx, n.ty, n.tz);
+    _p.set(n.tx, n.ty, n.tz);
+    m.compose(_p, _q, _s);
     pickedInst.setMatrixAt(i, m);
     n.instIndex = i; n.instGroup = 'picked';
   });
   rejected.forEach((n, i) => {
-    m.makeTranslation(n.tx, n.ty, n.tz);
+    _p.set(n.tx, n.ty, n.tz);
+    m.compose(_p, _q, _s);
     rejectedInst.setMatrixAt(i, m);
     n.instIndex = i; n.instGroup = 'rejected';
   });
@@ -527,40 +558,63 @@ function buildScene(treeInput) {
 // Camera framing
 // ===================================================================
 function recenterCamera() {
+  // Keep aspect in sync with the actual canvas before fitting
+  camera.aspect = (renderer.domElement.clientWidth || innerWidth) /
+                  (renderer.domElement.clientHeight || innerHeight);
+  camera.updateProjectionMatrix();
+
   const box = new THREE.Box3();
   allNodes.forEach(n => box.expandByPoint(new THREE.Vector3(n.tx, n.ty, n.tz)));
-  const center = new THREE.Vector3();
-  box.getCenter(center);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const maxDim = Math.max(size.x, size.y, size.z) * 0.9;
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const center = sphere.center;
+  const radius = sphere.radius || 30;
+  const maxDim = radius * 2;
 
-  camera.position.set(center.x, center.y + maxDim * 0.4, maxDim * 1.1);
+  // Fit the bounding sphere using the MORE constrained of vertical / horizontal FOV
+  const vFov = camera.fov * Math.PI / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const fitFov = Math.min(vFov, hFov);
+  const dist = (radius / Math.sin(fitFov / 2)) * 1.12;
+
+  camera.position.set(center.x, center.y, center.z + dist);
   camera.lookAt(center);
   controls.setOrientationFromCamera();
+
+  // Adapt fog + fly speed to the tree's scale so large trees stay visible
+  scene.fog.near = maxDim * 0.6;
+  scene.fog.far = maxDim * 4.0;
+  controls.baseSpeed = Math.max(60, maxDim * 0.3);
+  // Label LOD radius: show all on small trees, only nearby on large ones
+  labelMaxDist = Math.max(900, maxDim * 0.25);
 }
 
 // ===================================================================
 // Label projection (every frame, viewport visible only)
 // ===================================================================
 const projV = new THREE.Vector3();
+const _camPos = new THREE.Vector3();
+let labelMaxDist = 1e9;   // set per-tree in recenterCamera; large trees hide far labels
 function updateLabels() {
   const w = innerWidth, h = innerHeight;
+  camera.getWorldPosition(_camPos);
   for (const n of allNodes) {
+    // distance LOD: only label nodes near the camera (keeps big trees readable)
+    const dx = n.tx - _camPos.x, dy = n.ty - _camPos.y, dz = n.tz - _camPos.z;
+    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    const forced = (n === hoveredNode || n === selectedNode);
+    if (dist > labelMaxDist && !forced) { n.labelEl.style.display = 'none'; continue; }
+
     projV.set(n.tx, n.ty, n.tz);
     projV.project(camera);
-    // behind camera or off-screen
     if (projV.z < -1 || projV.z > 1 || Math.abs(projV.x) > 1.2 || Math.abs(projV.y) > 1.2) {
       n.labelEl.style.display = 'none';
       continue;
     }
-    // depth-based opacity (farther = fainter)
-    const depth = projV.z;
-    const opacity = 1.0 - depth * 0.8;
+    const opacity = forced ? 1 : Math.max(0.25, 1.0 - (dist / labelMaxDist) * 0.85);
     n.labelEl.style.display = '';
     n.labelEl.style.left = ((projV.x * 0.5 + 0.5) * w) + 'px';
     n.labelEl.style.top = ((-projV.y * 0.5 + 0.5) * h) + 'px';
-    n.labelEl.style.opacity = Math.max(0.2, Math.min(1, opacity));
+    n.labelEl.style.opacity = opacity;
   }
 }
 
@@ -735,7 +789,7 @@ function animate() {
   if (highlightMesh.visible) {
     const t = performance.now() * 0.003;
     highlightMesh.rotation.y += dt * 0.6;
-    highlightMesh.scale.setScalar(1 + Math.sin(t) * 0.12);
+    highlightMesh.scale.setScalar(nodeScale * (1 + Math.sin(t) * 0.12));
   }
 
   updateLabels();
