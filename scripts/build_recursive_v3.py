@@ -47,13 +47,18 @@ ROLE = {
     "treasure_chest": "prop", "cannon_01": "prop", "painted_wooden_bench": "prop",
     "WoodenChair_01": "prop", "painted_wooden_chair_02": "prop",
     "folding_wooden_stool": "prop", "wooden_stool_01": "prop",
-    # tables — surfaces that host decor on top (depth recursion)
+    # tables — surfaces that host tabletop items on top (depth recursion)
     "WoodenTable_01": "table", "round_wooden_table_01": "table",
-    # decor — leaves, on tables or beside props
-    "ceramic_vase_01": "decor", "ceramic_vase_02": "decor", "jug_01": "decor",
-    "food_apple_01": "decor", "wicker_basket_01": "decor", "wicker_basket_02": "decor",
-    "kite_shield": "decor", "wooden_axe": "decor", "wooden_lantern_01": "decor",
-    "Lantern_01": "decor", "lantern_chandelier_01": "decor",
+    # tabletop — SMALL items that genuinely sit on a table surface
+    "ceramic_vase_01": "tabletop", "ceramic_vase_02": "tabletop", "jug_01": "tabletop",
+    "food_apple_01": "tabletop", "wicker_basket_02": "tabletop",
+    "wooden_lantern_01": "tabletop", "Lantern_01": "tabletop",
+    # leaning / standing props placed on the GROUND near anchors
+    "kite_shield": "prop", "wooden_axe": "prop", "wicker_basket_01": "prop",
+    # NOTE: lantern_chandelier_01 deliberately DROPPED — it is a ceiling-hung
+    #   fixture with no valid placement in an open-air scene. Putting it in the
+    #   "decor" pool is exactly what caused the chandelier-under-the-table bug.
+    #   Proper fix later = per-asset PlacementMetadata (attaches_to: ceiling).
     # ground cover — leaves, scattered low to the ground
     "shrub_01": "ground", "shrub_02": "ground", "fern_02": "ground", "moss_01": "ground",
     "grass_medium_01": "ground", "rock_07": "ground", "rock_09": "ground",
@@ -66,7 +71,7 @@ for s, r in ROLE.items():
         BY_ROLE.setdefault(r, []).append(s)
 
 FOOTPRINT_FACTOR = {"anchor": 0.55, "tree": 0.22, "prop": 0.5,
-                    "table": 0.5, "decor": 0.45, "ground": 0.38}
+                    "table": 0.5, "tabletop": 0.45, "ground": 0.38}
 # small cm-scale items get scaled up so they read on a 100m+ map
 SCALE_OVERRIDE = {"rock_09": 3.0, "stone_01": 3.0, "moss_01": 3.5,
                   "grass_medium_01": 1.8, "rock_07": 1.8, "food_apple_01": 1.5}
@@ -151,15 +156,28 @@ def stop() -> bool:
 # ---------------------------------------------------------------------------
 # Recursive growth
 # ---------------------------------------------------------------------------
-def grow_table(parent_idx, x, y, table_slug):
-    """Depth recursion: a few decor items on the table top."""
-    th = top_z(table_slug, scale_of(table_slug))
-    for _ in range(random.randint(2, 4)):
+def grow_table(parent_idx, tx, ty, table_slug):
+    """Depth recursion: a few SMALL items placed accurately ON the table top.
+
+    Fixes the chandelier-under-table bug:
+      * pool restricted to 'tabletop' (no ceiling fixtures, no big props)
+      * world z = table-top height + the item's own base offset (sits ON, not in)
+      * fixed grid spots so items never overlap (no collide=False free-for-all)
+    """
+    sc_t = scale_of(table_slug)
+    dx, dy, dz, _ = dims(table_slug)
+    table_top = dz * sc_t                       # table base sits at z=0 after ground-snap
+    spots = [(-0.28, 0.0), (0.28, 0.0), (0.0, 0.22), (0.0, -0.22)]
+    random.shuffle(spots)
+    for i in range(random.randint(1, 3)):
         if stop():
             return
-        slug = random.choice(BY_ROLE["decor"])
-        place(slug, x + random.uniform(-35, 35), y + random.uniform(-35, 35),
-              parent_idx, z=th, collide=False)
+        slug = random.choice(BY_ROLE["tabletop"])
+        fx, fy = spots[i]
+        ox, oy = fx * dx * sc_t, fy * dy * sc_t
+        item_base = -dims(slug)[3] * scale_of(slug)   # lift item so its base is on the surface
+        place(slug, tx + ox, ty + oy, parent_idx,
+              z=table_top + item_base, collide=False)
 
 
 def grow_town(reg):
