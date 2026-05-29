@@ -1,0 +1,902 @@
+[
+  {
+    "slug": "tree_stump_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Tree Stump 01",
+    "mesh": "/Game/Lethe/Models/tree_stump_01/tree_stump_01_1k/StaticMeshes/tree_stump_01_1k.tree_stump_01_1k",
+    "bounds_min": [
+      -78.44194030761719,
+      -76.04432678222656,
+      -19.297842025756836
+    ],
+    "bounds_max": [
+      64.11310577392578,
+      82.98710632324219,
+      37.96891403198242
+    ]
+  },
+  {
+    "slug": "tree_stump_02",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Tree Stump 02",
+    "mesh": "/Game/Lethe/Models/tree_stump_02/tree_stump_02_1k/StaticMeshes/tree_stump_02_1k.tree_stump_02_1k",
+    "bounds_min": [
+      -71.78851318359375,
+      -67.43079376220703,
+      -23.348920822143555
+    ],
+    "bounds_max": [
+      80.3812484741211,
+      71.82251739501953,
+      28.860294342041016
+    ]
+  },
+  {
+    "slug": "dead_tree_trunk",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Dead Tree Trunk",
+    "mesh": "/Game/Lethe/Models/dead_tree_trunk/dead_tree_trunk_1k/StaticMeshes/dead_tree_trunk_1k.dead_tree_trunk_1k",
+    "bounds_min": [
+      -153.91004943847656,
+      -17.08028793334961,
+      -2.773353099822998
+    ],
+    "bounds_max": [
+      151.1914520263672,
+      10.672463417053223,
+      26.26980209350586
+    ]
+  },
+  {
+    "slug": "dead_tree_trunk_02",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Dead Tree Trunk 02",
+    "mesh": "/Game/Lethe/Models/dead_tree_trunk_02/dead_tree_trunk_02_1k/StaticMeshes/dead_tree_trunk_02_1k.dead_tree_trunk_02_1k",
+    "bounds_min": [
+      -192.4416961669922,
+      -50.08216094970703,
+      -32.83522415161133
+    ],
+    "bounds_max": [
+      212.69467163085938,
+      55.53070831298828,
+      72.67211151123047
+    ]
+  },
+  {
+    "slug": "fir_tree_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Fir Tree 01",
+    "mesh": "/Game/Lethe/Models/fir_tree_01/fir_tree_01_1k/StaticMeshes/fir_tree_01_c_LOD0.fir_tree_01_c_LOD0",
+    "bounds_min": [
+      925.2969360351562,
+      -299.6272888183594,
+      -9.382283210754395
+    ],
+    "bounds_max": [
+      1555.890869140625,
+      296.9964599609375,
+      1442.6759033203125
+    ]
+  },
+  {
+    "slug": "pine_tree_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Pine Tree 01",
+    "mesh": "/Game/Lethe/Models/pine_tree_01/pine_tree_01_1k/StaticMeshes/pine_tree_01_c_LOD0.pine_tree_01_c_LOD0",
+    "bounds_min": [
+      471.0280456542969,
+      -408.114990234375,
+      -9.382283210754395
+    ],
+    "bounds_max": [
+      1233.599365234375,
+      377.43359375,
+      1745.01806640625
+    ]
+  },
+  {
+    "slug": "tree_small_02",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Tree Small 02",
+    "mesh": "/Game/Lethe/Models/tree_small_02/tree_small_02_1k/StaticMeshes/tree_small_02_1k.tree_small_02_1k",
+    "bounds_min": [
+      -130.89935302734375,
+      -138.26268005371094,
+      -2.4103846549987793
+    ],
+    "bounds_max": [
+      160.77066040039062,
+      290.98504638671875,
+      453.2637023925781
+    ]
+  },
+  {
+    "slug": "island_tree_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Island Tree 01",
+    "mesh": "/Game/Lethe/Models/island_tree_01/island_tree_01_1k/StaticMeshes/island_tree_01_1k.island_tree_01_1k",
+    "bounds_min": [
+      -234.44456481933594,
+      -258.35382080078125,
+      -2.032789945602417
+    ],
+    "bounds_max": [
+      241.0703887939453,
+      223.41415405273438,
+      500.7118835449219
+    ]
+  },
+  {
+    "slug": "fern_02",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Fern 02",
+    "mesh": "/Game/Lethe/Models/fern_02/fern_02_1k/StaticMeshes/fern_02_b.fern_02_b",
+    "bounds_min": [
+      -52.81425857543945,
+      -42.18744659423828,
+      -3.05102801322937
+    ],
+    "bounds_max": [
+      46.160484313964844,
+      47.18152618408203,
+      39.71844482421875
+    ]
+  },
+  {
+    "slug": "shrub_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Shrub 01",
+    "mesh": "/Game/Lethe/Models/shrub_01/shrub_01_1k/StaticMeshes/shrub_01_1k.shrub_01_1k",
+    "bounds_min": [
+      -185.45849609375,
+      -11.381389617919922,
+      -0.8752564787864685
+    ],
+    "bounds_max": [
+      73.20764923095703,
+      10.47470760345459,
+      38.722171783447266
+    ]
+  },
+  {
+    "slug": "shrub_02",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Shrub 02",
+    "mesh": "/Game/Lethe/Models/shrub_02/shrub_02_1k/StaticMeshes/shrub_02_a.shrub_02_a",
+    "bounds_min": [
+      -209.21690368652344,
+      -88.34040069580078,
+      -1.1617703437805176
+    ],
+    "bounds_max": [
+      -78.01636505126953,
+      75.76029205322266,
+      167.73594665527344
+    ]
+  },
+  {
+    "slug": "boulder_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Boulder 01",
+    "mesh": "/Game/Lethe/Models/boulder_01/boulder_01_1k/StaticMeshes/boulder_01_1k.boulder_01_1k",
+    "bounds_min": [
+      -74.81597137451172,
+      -94.84404754638672,
+      -7.364296913146973
+    ],
+    "bounds_max": [
+      52.39759063720703,
+      88.18937683105469,
+      93.01872253417969
+    ]
+  },
+  {
+    "slug": "rock_07",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Rock 07",
+    "mesh": "/Game/Lethe/Models/rock_07/rock_07_1k/StaticMeshes/rock_07_1k.rock_07_1k",
+    "bounds_min": [
+      -8.758011817932129,
+      -17.79749870300293,
+      -0.190715491771698
+    ],
+    "bounds_max": [
+      8.130179405212402,
+      14.23019790649414,
+      14.181299209594727
+    ]
+  },
+  {
+    "slug": "rock_09",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Rock 09",
+    "mesh": "/Game/Lethe/Models/rock_09/rock_09_1k/StaticMeshes/rock_09_1k.rock_09_1k",
+    "bounds_min": [
+      -3.67327880859375,
+      -6.106271743774414,
+      -0.057409774512052536
+    ],
+    "bounds_max": [
+      3.7277073860168457,
+      8.356179237365723,
+      3.229531764984131
+    ]
+  },
+  {
+    "slug": "stone_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Stone 01",
+    "mesh": "/Game/Lethe/Models/stone_01/stone_01_1k/StaticMeshes/stone_01_1k.stone_01_1k",
+    "bounds_min": [
+      -7.027817726135254,
+      -4.466071128845215,
+      -1.4639936685562134
+    ],
+    "bounds_max": [
+      7.658656597137451,
+      4.439558982849121,
+      5.715522766113281
+    ]
+  },
+  {
+    "slug": "moss_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Moss 01",
+    "mesh": "/Game/Lethe/Models/moss_01/moss_01_1k/StaticMeshes/moss_01_c_LOD0.moss_01_c_LOD0",
+    "bounds_min": [
+      2.5718045234680176,
+      -0.903869092464447,
+      -0.007900998927652836
+    ],
+    "bounds_max": [
+      4.389801979064941,
+      0.496442586183548,
+      2.766827344894409
+    ]
+  },
+  {
+    "slug": "grass_medium_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Grass Medium 01",
+    "mesh": "/Game/Lethe/Models/grass_medium_01/grass_medium_01_1k/StaticMeshes/grass_medium_01_small_a_LOD0.grass_medium_01_small_a_LOD0",
+    "bounds_min": [
+      -7.992804050445557,
+      -8.258193016052246,
+      -0.2481127679347992
+    ],
+    "bounds_max": [
+      10.491206169128418,
+      7.973111629486084,
+      13.794554710388184
+    ]
+  },
+  {
+    "slug": "dry_branches_medium_01",
+    "role": "terrain_nature",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Dry Branches Medium 01",
+    "mesh": "/Game/Lethe/Models/dry_branches_medium_01/dry_branches_medium_01_1k/StaticMeshes/dry_branches_medium_01_c.dry_branches_medium_01_c",
+    "bounds_min": [
+      38.14794921875,
+      -45.56113815307617,
+      -0.461986780166626
+    ],
+    "bounds_max": [
+      51.20484924316406,
+      32.15144729614258,
+      13.863995552062988
+    ]
+  },
+  {
+    "slug": "large_castle_door",
+    "role": "structure",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Large Castle Door",
+    "mesh": "/Game/Lethe/Models/large_castle_door/large_castle_door_1k/StaticMeshes/large_castle_door_frame.large_castle_door_frame",
+    "bounds_min": [
+      -105.02819061279297,
+      -8.49074935913086,
+      -2.969646453857422
+    ],
+    "bounds_max": [
+      96.18338012695312,
+      4.409465789794922,
+      293.5055847167969
+    ]
+  },
+  {
+    "slug": "large_iron_gate",
+    "role": "structure",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Large Iron Gate",
+    "mesh": "/Game/Lethe/Models/large_iron_gate/large_iron_gate_1k/StaticMeshes/large_iron_gate_right_door.large_iron_gate_right_door",
+    "bounds_min": [
+      -3.631901741027832,
+      -2.3921902179718018,
+      -0.7873366475105286
+    ],
+    "bounds_max": [
+      143.3621826171875,
+      6.15086555480957,
+      292.0780334472656
+    ]
+  },
+  {
+    "slug": "stone_fire_pit",
+    "role": "structure",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Stone Fire Pit",
+    "mesh": "/Game/Lethe/Models/stone_fire_pit/stone_fire_pit_1k/StaticMeshes/stone_fire_pit_1k.stone_fire_pit_1k",
+    "bounds_min": [
+      -73.63164520263672,
+      -71.49089813232422,
+      -19.34229278564453
+    ],
+    "bounds_max": [
+      71.21797943115234,
+      71.83255004882812,
+      19.490314483642578
+    ]
+  },
+  {
+    "slug": "modular_fort_01",
+    "role": "structure",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Modular Fort 01",
+    "mesh": "/Game/Lethe/Models/modular_fort_01/modular_fort_01_1k/StaticMeshes/modular_fort_01_wall_thick_corner_02.modular_fort_01_wall_thick_corner_02",
+    "bounds_min": [
+      1006.3436889648438,
+      1983.2830810546875,
+      0.0
+    ],
+    "bounds_max": [
+      1713.6119384765625,
+      2555.320556640625,
+      852.562744140625
+    ]
+  },
+  {
+    "slug": "gate_latch_01",
+    "role": "structure",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Gate Latch 01",
+    "mesh": "/Game/Lethe/Models/gate_latch_01/gate_latch_01_1k/StaticMeshes/gate_latch_01_frame.gate_latch_01_frame",
+    "bounds_min": [
+      -3.0518746376037598,
+      0.021857209503650665,
+      -3.6822245121002197
+    ],
+    "bounds_max": [
+      3.0518741607666016,
+      6.567295551300049,
+      4.015225410461426
+    ]
+  },
+  {
+    "slug": "wooden_barrels_01",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wooden Barrels 01",
+    "mesh": "/Game/Lethe/Models/wooden_barrels_01/wooden_barrels_01_1k/StaticMeshes/wooden_barrels_01_barrel01.wooden_barrels_01_barrel01",
+    "bounds_min": [
+      110.4242172241211,
+      -193.24111938476562,
+      0.0021108423825353384
+    ],
+    "bounds_max": [
+      184.7242431640625,
+      -118.94135284423828,
+      91.68019104003906
+    ]
+  },
+  {
+    "slug": "wine_barrel_01",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wine Barrel 01",
+    "mesh": "/Game/Lethe/Models/wine_barrel_01/wine_barrel_01_1k/StaticMeshes/wine_barrel_01_Lid.wine_barrel_01_Lid",
+    "bounds_min": [
+      -28.936016082763672,
+      -28.94226837158203,
+      82.20306396484375
+    ],
+    "bounds_max": [
+      28.93631362915039,
+      28.941852569580078,
+      83.73162078857422
+    ]
+  },
+  {
+    "slug": "wooden_crate_01",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wooden Crate 01",
+    "mesh": "/Game/Lethe/Models/wooden_crate_01/wooden_crate_01_1k/StaticMeshes/wooden_crate_01_lid.wooden_crate_01_lid",
+    "bounds_min": [
+      -35.390968322753906,
+      -19.613962173461914,
+      29.94623565673828
+    ],
+    "bounds_max": [
+      35.390968322753906,
+      19.613962173461914,
+      34.168495178222656
+    ]
+  },
+  {
+    "slug": "wooden_crate_02",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wooden Crate 02",
+    "mesh": "/Game/Lethe/Models/wooden_crate_02/wooden_crate_02_1k/StaticMeshes/wooden_crate_02_crate.wooden_crate_02_crate",
+    "bounds_min": [
+      -26.455047607421875,
+      -58.33403396606445,
+      -0.9823650121688843
+    ],
+    "bounds_max": [
+      26.455047607421875,
+      58.298545837402344,
+      43.545738220214844
+    ]
+  },
+  {
+    "slug": "wooden_bucket_01",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wooden Bucket 01",
+    "mesh": "/Game/Lethe/Models/wooden_bucket_01/wooden_bucket_01_1k/StaticMeshes/wooden_bucket_01.wooden_bucket_01",
+    "bounds_min": [
+      -17.329275131225586,
+      -16.99605941772461,
+      0.013674795627593994
+    ],
+    "bounds_max": [
+      17.368728637695312,
+      17.226058959960938,
+      34.917091369628906
+    ]
+  },
+  {
+    "slug": "wooden_bucket_02",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wooden Bucket 02",
+    "mesh": "/Game/Lethe/Models/wooden_bucket_02/wooden_bucket_02_1k/StaticMeshes/wooden_bucket_02.wooden_bucket_02",
+    "bounds_min": [
+      -30.77849769592285,
+      -30.869504928588867,
+      0.026145577430725098
+    ],
+    "bounds_max": [
+      30.754167556762695,
+      30.760839462280273,
+      35.068695068359375
+    ]
+  },
+  {
+    "slug": "treasure_chest",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Treasure Chest",
+    "mesh": "/Game/Lethe/Models/treasure_chest/treasure_chest_1k/StaticMeshes/treasure_chest_bottom.treasure_chest_bottom",
+    "bounds_min": [
+      -47.95182800292969,
+      -26.032299041748047,
+      -0.1682654321193695
+    ],
+    "bounds_max": [
+      47.95182800292969,
+      25.530349731445312,
+      42.39760971069336
+    ]
+  },
+  {
+    "slug": "ceramic_vase_01",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Ceramic Vase 01",
+    "mesh": "/Game/Lethe/Models/ceramic_vase_01/ceramic_vase_01_1k/StaticMeshes/ceramic_vase_01_1k.ceramic_vase_01_1k",
+    "bounds_min": [
+      -10.181723594665527,
+      -10.181842803955078,
+      0.1208987906575203
+    ],
+    "bounds_max": [
+      10.181723594665527,
+      10.181790351867676,
+      40.147727966308594
+    ]
+  },
+  {
+    "slug": "ceramic_vase_02",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Ceramic Vase 02",
+    "mesh": "/Game/Lethe/Models/ceramic_vase_02/ceramic_vase_02_1k/StaticMeshes/ceramic_vase_02_1k.ceramic_vase_02_1k",
+    "bounds_min": [
+      -10.918986320495605,
+      -10.919084548950195,
+      0.11435861140489578
+    ],
+    "bounds_max": [
+      10.918987274169922,
+      10.919087409973145,
+      31.032838821411133
+    ]
+  },
+  {
+    "slug": "jug_01",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Jug 01",
+    "mesh": "/Game/Lethe/Models/jug_01/jug_01_1k/StaticMeshes/jug_01_1k.jug_01_1k",
+    "bounds_min": [
+      -15.232536315917969,
+      -8.376311302185059,
+      0.024109069257974625
+    ],
+    "bounds_max": [
+      12.299630165100098,
+      8.376311302185059,
+      21.155454635620117
+    ]
+  },
+  {
+    "slug": "wicker_basket_01",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wicker Basket 01",
+    "mesh": "/Game/Lethe/Models/wicker_basket_01/wicker_basket_01_1k/StaticMeshes/wicker_basket_01_1k.wicker_basket_01_1k",
+    "bounds_min": [
+      -19.1882266998291,
+      -14.794304847717285,
+      -0.09166552126407623
+    ],
+    "bounds_max": [
+      19.134199142456055,
+      14.707215309143066,
+      11.650628089904785
+    ]
+  },
+  {
+    "slug": "wicker_basket_02",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wicker Basket 02",
+    "mesh": "/Game/Lethe/Models/wicker_basket_02/wicker_basket_02_1k/StaticMeshes/wicker_basket_02_base.wicker_basket_02_base",
+    "bounds_min": [
+      -10.757287979125977,
+      -10.714859962463379,
+      -0.029757598415017128
+    ],
+    "bounds_max": [
+      10.43540096282959,
+      10.918554306030273,
+      20.016027450561523
+    ]
+  },
+  {
+    "slug": "cannon_01",
+    "role": "container_prop",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Cannon 01",
+    "mesh": "/Game/Lethe/Models/cannon_01/cannon_01_1k/StaticMeshes/cannon_01_frame.cannon_01_frame",
+    "bounds_min": [
+      -46.90387725830078,
+      -68.0999755859375,
+      7.858051300048828
+    ],
+    "bounds_max": [
+      46.90387725830078,
+      69.5702896118164,
+      67.16710662841797
+    ]
+  },
+  {
+    "slug": "wooden_lantern_01",
+    "role": "lighting",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wooden Lantern 01",
+    "mesh": "/Game/Lethe/Models/wooden_lantern_01/wooden_lantern_01_1k/StaticMeshes/wooden_lantern_01_door.wooden_lantern_01_door",
+    "bounds_min": [
+      -7.215641975402832,
+      7.5934271812438965,
+      1.600082278251648
+    ],
+    "bounds_max": [
+      7.228201866149902,
+      12.418060302734375,
+      32.665855407714844
+    ]
+  },
+  {
+    "slug": "Lantern_01",
+    "role": "lighting",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Lantern 01",
+    "mesh": "/Game/Lethe/Models/Lantern_01/Lantern_01_1k/StaticMeshes/Lantern_01_glass.Lantern_01_glass",
+    "bounds_min": [
+      -3.5244410037994385,
+      -3.5290486812591553,
+      6.138340473175049
+    ],
+    "bounds_max": [
+      3.530388593673706,
+      3.5257816314697266,
+      12.966423034667969
+    ]
+  },
+  {
+    "slug": "lantern_chandelier_01",
+    "role": "lighting",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Lantern Chandelier 01",
+    "mesh": "/Game/Lethe/Models/lantern_chandelier_01/lantern_chandelier_01_1k/StaticMeshes/lantern_chandelier_01_1k.lantern_chandelier_01_1k",
+    "bounds_min": [
+      -28.537261962890625,
+      -28.728483200073242,
+      -86.52586364746094
+    ],
+    "bounds_max": [
+      29.37976837158203,
+      28.735179901123047,
+      1.2329237461090088
+    ]
+  },
+  {
+    "slug": "painted_wooden_bench",
+    "role": "furniture",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Painted Wooden Bench",
+    "mesh": "/Game/Lethe/Models/painted_wooden_bench/painted_wooden_bench_1k/StaticMeshes/painted_wooden_bench_1k.painted_wooden_bench_1k",
+    "bounds_min": [
+      -57.60610580444336,
+      -25.3698787689209,
+      -0.04994966834783554
+    ],
+    "bounds_max": [
+      58.88825225830078,
+      24.2844295501709,
+      88.87919616699219
+    ]
+  },
+  {
+    "slug": "WoodenChair_01",
+    "role": "furniture",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Woodenchair 01",
+    "mesh": "/Game/Lethe/Models/WoodenChair_01/WoodenChair_01_1k/StaticMeshes/WoodenChair_01_1k.WoodenChair_01_1k",
+    "bounds_min": [
+      -34.40864181518555,
+      -36.71490478515625,
+      -0.1366962194442749
+    ],
+    "bounds_max": [
+      34.40864181518555,
+      29.13127899169922,
+      227.21478271484375
+    ]
+  },
+  {
+    "slug": "WoodenTable_01",
+    "role": "furniture",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Woodentable 01",
+    "mesh": "/Game/Lethe/Models/WoodenTable_01/WoodenTable_01_1k/StaticMeshes/WoodenTable_01_1k.WoodenTable_01_1k",
+    "bounds_min": [
+      -89.9823989868164,
+      -32.85872268676758,
+      -4.588600859278813e-06
+    ],
+    "bounds_max": [
+      89.9823989868164,
+      32.858741760253906,
+      54.88492202758789
+    ]
+  },
+  {
+    "slug": "round_wooden_table_01",
+    "role": "furniture",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Round Wooden Table 01",
+    "mesh": "/Game/Lethe/Models/round_wooden_table_01/round_wooden_table_01_1k/StaticMeshes/round_wooden_table_01_bolts.round_wooden_table_01_bolts",
+    "bounds_min": [
+      -13.57863998413086,
+      -14.602396011352539,
+      92.01406860351562
+    ],
+    "bounds_max": [
+      16.80731201171875,
+      13.143043518066406,
+      93.58263397216797
+    ]
+  },
+  {
+    "slug": "folding_wooden_stool",
+    "role": "furniture",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Folding Wooden Stool",
+    "mesh": "/Game/Lethe/Models/folding_wooden_stool/folding_wooden_stool_1k/StaticMeshes/folding_wooden_stool_1k.folding_wooden_stool_1k",
+    "bounds_min": [
+      -26.30695152282715,
+      -27.18648910522461,
+      0.0033736228942871094
+    ],
+    "bounds_max": [
+      26.476430892944336,
+      27.52189064025879,
+      44.20022201538086
+    ]
+  },
+  {
+    "slug": "wooden_stool_01",
+    "role": "furniture",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wooden Stool 01",
+    "mesh": "/Game/Lethe/Models/wooden_stool_01/wooden_stool_01_1k/StaticMeshes/wooden_stool_01_1k.wooden_stool_01_1k",
+    "bounds_min": [
+      -21.267757415771484,
+      -22.118141174316406,
+      0.0036797416396439075
+    ],
+    "bounds_max": [
+      21.267757415771484,
+      22.118141174316406,
+      43.73894500732422
+    ]
+  },
+  {
+    "slug": "painted_wooden_chair_02",
+    "role": "furniture",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Painted Wooden Chair 02",
+    "mesh": "/Game/Lethe/Models/painted_wooden_chair_02/painted_wooden_chair_02_1k/StaticMeshes/painted_wooden_chair_02_1k.painted_wooden_chair_02_1k",
+    "bounds_min": [
+      -33.48668670654297,
+      -36.327598571777344,
+      -3.327553713461384e-06
+    ],
+    "bounds_max": [
+      30.452272415161133,
+      29.882183074951172,
+      126.37710571289062
+    ]
+  },
+  {
+    "slug": "kite_shield",
+    "role": "misc",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Kite Shield",
+    "mesh": "/Game/Lethe/Models/kite_shield/kite_shield_1k/StaticMeshes/kite_shield_body.kite_shield_body",
+    "bounds_min": [
+      -26.61374855041504,
+      -5.2249226570129395,
+      -72.35829162597656
+    ],
+    "bounds_max": [
+      26.61374855041504,
+      7.66597843170166,
+      64.14820861816406
+    ]
+  },
+  {
+    "slug": "wooden_axe",
+    "role": "misc",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Wooden Axe",
+    "mesh": "/Game/Lethe/Models/wooden_axe/wooden_axe_1k/StaticMeshes/wooden_axe_1k.wooden_axe_1k",
+    "bounds_min": [
+      -2.3832290172576904,
+      -3.5909056663513184,
+      -21.861276626586914
+    ],
+    "bounds_max": [
+      2.3332679271698,
+      17.84364891052246,
+      41.17219924926758
+    ]
+  },
+  {
+    "slug": "spinning_wheel_01",
+    "role": "misc",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Spinning Wheel 01",
+    "mesh": "/Game/Lethe/Models/spinning_wheel_01/spinning_wheel_01_1k/StaticMeshes/spinning_wheel_01_1k.spinning_wheel_01_1k",
+    "bounds_min": [
+      -22.011323928833008,
+      -47.459564208984375,
+      0.010898223146796227
+    ],
+    "bounds_max": [
+      26.92865753173828,
+      55.02613830566406,
+      96.63301849365234
+    ]
+  },
+  {
+    "slug": "food_apple_01",
+    "role": "misc",
+    "ok": true,
+    "resolution": "1k",
+    "name": "Food Apple 01",
+    "mesh": "/Game/Lethe/Models/food_apple_01/food_apple_01_1k/StaticMeshes/food_apple_01_1k.food_apple_01_1k",
+    "bounds_min": [
+      -4.838135719299316,
+      -4.581700325012207,
+      -0.002262206980958581
+    ],
+    "bounds_max": [
+      4.91798210144043,
+      5.00847053527832,
+      8.536731719970703
+    ]
+  }
+]
