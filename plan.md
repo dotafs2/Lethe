@@ -1,6 +1,6 @@
 # Lethe 自动地编工具 — 设计文档
 
-> Status: v3（算法收敛到"区域容器 + 爬虫递归生长 + 节点级拍照验证"）
+> Status: v4（主数据结构定为"层级树 + BFS 逐层由粗到细建造 + 层级 checkpoint 验证"）
 > 上次更新: 2026-05-29
 > 配套 demo: `tree-3d-demo.html`（浏览器打开即可）
 
@@ -100,71 +100,63 @@ scene_brief:
 
 整个 generation 期间 **immutable**，喂给 Selector / Judge / Validator 三个组件。
 
-### 2.5 放置算法：区域容器 + 爬虫递归生长 + 节点级验证 ⭐核心
+### 2.5 主数据结构：层级树 + BFS 逐层由粗到细建造 ⭐核心
 
-这是整个工具的核心算法，三层结构：
+**一棵树，树深度 = 细节分辨率（LOD）。建造按 BFS 一层一层横扫推进，由粗到细。**
+对应关卡设计的标准工作流：blockout（灰盒大框架）→ greybox（填建筑）→ detail pass（填道具）→ dressing（撒装饰）。
+
+**层级语义（LOD）**：
 
 ```
-Layer 0  — 地面/地形：所有物体落地的参照面，也是树的 root（不能砍）
-Layer 1  — LLM 划区域（"花盆"，调用少）：
-             regions[] = {type, polygon, density, allowed_tags, anchor_slug}
-             先手写跑通，再接 LLM
-Layer 2  — 每个区域内"爬虫式"递归生长（核心循环）：
+Level 0  World
+Level 1  大框架   区域 + 主干道 + 地标（城门/广场/堡垒）   最大、最少、最关键
+Level 2  中结构   建筑、树丛、聚落点
+Level 3  细结构   家具、桶、车、摊位、道具
+Level 4  细节     桌上摆件 + 挂件 + 地被 + 草石落叶        最细、最多
 ```
+
+每往下一层：数量↑、体积↓、对整体影响↓。
+
+**建造 = BFS 逐层（不是 DFS 递归卷一棵子树）**：
 
 ```python
-grow(node, region, depth):
-    if depth >= MAX_DEPTH or region.saturated():
-        return
-
-    # ① 广度：在 node 周围铺一圈子物体
-    children = []
-    for slug in pick_children(node, region.allowed_tags):
-        for attempt in range(K):                      # K≈6
-            pos = sample_around(node)
-            z   = -bounds_min[slug].z * scale          # 落地校正
-            if no_overlap(pos, slug, grid):            # 只查已放置的邻居
-                c = place_tentative(slug, pos, yaw_rule(node, pos))
-                children.append(c); grid.insert(c)     # 空间哈希
-                break
-            # else: K 次全撞 → 跳过这个（"可以不放"）
-
-    # ② 验证：仅当 node 是 major anchor（建筑/树丛/区域核心）
-    if node.is_major:
-        photo = capture(node + children)
-        if not LLM_ok(photo, scene_brief):
-            rollback(children)                         # 撤销暂定，重采/剪枝
-            return
-    commit(children)                                   # 验过 → 永久，从此不动
-
-    # ③ 深度：递归每个能继续长的子节点
-    for c in children:
-        if c.can_grow:                                 # 建筑能长附属，草不能
-            grow(c, region, depth + 1)
+queue = [root]
+for level in 0, 1, 2, 3, 4:
+    this_layer = [n for n in queue if n.level == level]   # 全场景同级节点
+    for node in this_layer:
+        node.children = build_detail(node)                 # 生成这一级的细化
+        # 单物体放置：增量拒采 + 空间哈希 + 落地校正（见下）
+        queue += node.children
+    # ── 整层建完 = 一个 checkpoint ──
+    photo = capture_whole_scene()
+    if not LLM_ok(photo, scene_brief):
+        rollback(this_layer 的 children)                   # 只回退当前层，下面还没建
+        rebuild this layer
 ```
 
-**"深度优先 + 每个节点广度优先"**：DFS 递归遍历，但每个节点 visit 时先广度填满自己周围一圈，再钻进每个子节点继续卷。整棵树这样"爬"出来。
+**为什么 BFS 逐层，不是 DFS 递归**（这是关键修正）：
+
+| DFS 递归（一个 anchor 卷到底再下一个） | BFS 逐层（全场景同级一起推进） |
+|---|---|
+| 先卷的子树把空间占满，后面没位置 | **大物体（上层）先全部占位**，下层在剩余空间填，空间全局协调 |
+| 卷到一半看不出整体像不像镇 | **每层是 checkpoint**，大框架建完先看整体轮廓对不对再往下 |
+| 回退一个卷到底的子树代价大 | 回退只回退**当前层**（下面还没建），代价小 |
+
+**单物体放置机制（每个 `build_detail` 内部，不变）**：
+- 增量拒采：新物体只查已放置的邻居，撞了重采 / K 次全撞就跳过（"可以不放"）
+- 空间哈希：`no_overlap` 只查邻近 3×3 格，O(1) 均摊
+- 落地校正：`z = -bounds_min.z * scale` 让底部贴地
+- footprint ≠ visual AABB：树冠大但树干占地小，碰撞按 role 配占地半径
 
 **两阶段 commit（统一"永不动"与"验证重来"）**：
-- 生长时子物体是 `tentative`（暂定，可回滚）
-- 拍照验证通过 → `committed`（永久，从此永不动）
-- 验证失败 → 只撤销这个节点的暂定物体，重采
-- 即 "chunk 内线性，chunk 间可重采"，每个生长节点 = 一个 chunk
+- 一层建完前是 `tentative`（可回滚）；checkpoint 验证通过 → `committed`（永久，从此永不动）
+- 即 "层内线性，层间可重采"，每个 LOD 层 = 一个 chunk
 
-**验证粒度（成本/延迟命门）**：
-- 只验 major anchor 子树（建筑/树丛/区域核心），叶子小物（草/石/桶）跟父节点一起被验
-- 几十次 LLM、几分钟级；不是每个物体都验（那样上百次、10-15 分钟）
+**验证粒度**：按**层** checkpoint 验（4 次拍照看整体逐级细化），不是每个节点验。比 DFS 的"每子树验一次"更省、更符合"由粗到细逐级确认"。
 
-**五个必须做对的实现点**（today 裸 spawn 全没做，见第八节复盘）：
-1. **空间哈希** — `no_overlap` 只查邻近 3×3 格，O(1) 均摊；否则 1000 物体 ×K 重采会慢成几百万次
-2. **footprint ≠ visual AABB** — 树冠大但树干占地小，碰撞按 role 配占地半径
-3. **拒采会"放不满"** — 密度高时后放的反复撞→跳过，1000 目标可能只成 ~700-800，需接受
-4. **落地校正** — `z = -bounds_min.z * scale` 让底部贴地；today z 全=0 故悬浮
-5. **大物体先放** — 按 footprint 降序，先占位再填缝，避免大物被小物挤没位置
+**区域是"花盆"**：Level 1 先划分区域边界，后续层在各区域内填充，区域间不互相侵占空间。
 
-**关键参数**：`MAX_DEPTH`≈4，`K`≈6，`is_major`/`can_grow` 按 role 配置。
-
-**区域是"花盆"**：先划分区域边界，每区独立递归生长，区域间不互相侵占空间 —— 解决 DFS 先生长分支抢占空间的问题。
+**关键现实代价**：拒采会"放不满"（密度高时后放的反复撞→跳过），目标数只能近似达到，需接受。
 
 ### 2.6 Collision Matrix（4×4 channel）
 
@@ -272,7 +264,7 @@ DeepSeek Vision 用 90 tokens / 图（Claude 是 870 tokens），是这种 batch
 ✅ scripts/capture_scene.py                    SceneCapture2D 全景拍照（拍照验证基础设施）
 
 ❌ Layer1: LLM 区域规划（先手写区域跑通）       未开始
-❌ Layer2: 递归生长几何（增量拒采+空间哈希+落地+footprint）  未开始 ← 核心
+❌ Layer2: BFS 逐层建造几何（增量拒采+空间哈希+落地+footprint）  未开始 ← 核心
 ❌ Layer3: 节点级 VLM 拍照验证回路              未开始 ← 核心
 ❌ 地面/地形（Layer 0）                          未开始（today 被误删）
 ❌ PlacementMetadata schema (pydantic)         未开始
@@ -285,7 +277,7 @@ DeepSeek Vision 用 90 tokens / 图（Claude 是 870 tokens），是这种 batch
 ```
 第一步（纯几何，不接 LLM/VLM，解决 today 80% 问题）：
   ① 铺地面（Layer 0）
-  ② 写 Layer2 递归生长：增量拒采 + 空间哈希 + footprint + 落地校正
+  ② 写 Layer2 BFS 逐层建造：增量拒采 + 空间哈希 + footprint + 落地校正
   ③ 用手写的区域规划（2-3 个区）当 Layer1 的 stub 跑通
   ④ capture_scene 拍照看效果（这次有地面+落地+碰撞）
 
@@ -335,7 +327,9 @@ DeepSeek Vision 用 90 tokens / 图（Claude 是 870 tokens），是这种 batch
 | **Hard edge** | parent → child，子完全依赖父 |
 | **Soft edge** | 跨子树引用（当前未实现，TODO） |
 | **PlacementMetadata** | 每 asset 的元数据：tags / attaches_to / yaw_strategy / 等 |
-| **grow(node)** | 递归生长函数：广度填充周围 → 拍照验证 → 递归子节点 |
+| **LOD 层级** | 树深度 = 细节分辨率：L1 大框架→L2 中结构→L3 细结构→L4 细节 |
+| **BFS 逐层建造** | 全场景按 level 一层层横扫推进（由粗到细），非 DFS 卷子树 |
+| **层 checkpoint** | 每层建完拍一次照验整体，不对只回退当前层 |
 | **major anchor** | 需要拍照验证的大节点（建筑/树丛/区域核心） |
 | **tentative / committed** | 暂定（可回滚） / 永久（验过，永不动） |
 | **footprint** | 物体的占地投影（碰撞用，≠ visual AABB） |
