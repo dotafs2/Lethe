@@ -78,6 +78,23 @@ Quit Claude Desktop from the tray (not just close the window) and reopen.
 | `polyhaven_status` | — | Report whether the PolyHaven integration is toggled on in the editor menu. |
 | `polyhaven_search_hdri` | `query="", max_results=20` | Search PolyHaven's HDRI library. Returns slugs to feed into `polyhaven_set_sky`. |
 | `polyhaven_set_sky` | `slug, resolution="2k"` | Download an HDRI and set it as the current level's sky via a single tagged `HDRIBackdrop` actor (repeat calls swap, don't stack). |
+| `material_synth_generate` | `prompt, count=12, seed=0` | Generate stage-1 HLSL material candidates and return validation metadata. |
+| `material_synth_validate` | `hlsl_body` | Validate a raw Lethe HLSL material body against the fixed stage-1 interface. |
+| `material_synth_ue_script` | `candidate_json` or `prompt, variant_index` | Build the UE Python script that creates a Material asset from a candidate. |
+| `material_synth_create_in_ue` | `prompt, variant_index=0` | Generate one candidate and execute the UE material creation script through Remote Execution. |
+| `material_synth_export_pack` | `prompt, count=12, seed=0, output_dir="material-packs", corpus_index=""` | Export an offline review pack with manifest, HLSL files, reference context, and UE replay scripts. |
+| `material_synth_export_agent_pack` | `json_path, output_dir="material-packs"` | Export a pack from external agent candidate JSON. |
+| `material_synth_validate_agent_json` | `json_path, report_path=""` | Validate external agent candidate JSON before packing or UE replay. |
+| `material_synth_replay_pack_in_ue` | `pack_dir` | Execute a generated pack's `run_pack_in_ue.py` through UE Remote Execution. |
+| `material_synth_analyze_pack` | `pack_dir` | Analyze `ue_validation_report.json` and write customer-facing summary files. |
+| `material_synth_demo_pack` | `pack_dir` | Create synthetic previews and gallery for an existing pack without Unreal Editor. |
+| `material_synth_verify_pack` | `pack_dir, mode="pack"` | Verify pack/demo/UE replay artifact completeness. |
+| `material_synth_bundle_pack` | `pack_dir, output_zip="", mode="pack"` | Verify and zip a material pack for sharing. |
+| `material_synth_demo_bundle` | `prompt, count=12, seed=0, output_dir="material-packs", output_zip="", corpus_index=""` | Generate, synthetic-preview, verify, and zip a demo pack in one step. |
+| `material_synth_corpus_index` | `roots, output="material-corpus/index.json", source_label="local", license_label="unknown"` | Index local shader reference files with provenance metadata. |
+| `material_synth_corpus_search` | `index_path, query, limit=10` | Search a local shader reference index and return snippets plus license risk notes. |
+| `material_synth_corpus_fetch_manifest` | `manifest_json, output_dir="material-corpus/raw", index_output="material-corpus/index.json"` | Download explicitly listed free shader URLs, write provenance, and index them. |
+| `material_synth_doctor` | `ue_project=""` | Read-only readiness check for local tools and optional UE project setup. |
 
 ### Integrations (hot-switched)
 
@@ -90,6 +107,131 @@ MCP tool call — no editor or server restart needed.
   (already a dependency of `Lethe.uplugin`).
 
 Add your own:
+
+### Offline HLSL material packs
+
+Without a running Unreal Editor, generate a ranked material candidate pack:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli "anime ocean foam" --count 12 --output-dir material-packs
+```
+
+After UE replay writes `ue_validation_report.json`, generate the customer-facing
+summary and gallery:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli analyze <pack_dir>
+```
+
+After reinstalling the editable package, the `lethe-material-synth` console
+script provides the same entrypoint.
+
+The pack includes `run_pack_in_ue.py`, which can be executed inside Unreal
+Editor to create all exported candidates, write `ue_validation_report.json`,
+and export best-effort preview PNGs under `previews/`.
+The analyze step writes `customer_summary.json`, `customer_summary.md`, and
+`customer_gallery.html`.
+Generated candidates include `generation.agent_id` and `generation.strategy`
+metadata so 100-candidate batches already match the future multi-agent shape.
+External agents can emit the same candidate JSON and use `pack-json`; see
+`docs/material_synth_agent_contract.md`.
+Validate external agent output before packing:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli validate-json agents.json --report agent_validation_report.json
+```
+
+Build a local shader reference corpus without network access:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli corpus-index C:\Path\To\Shaders --output material-corpus\index.json --source-label "local-review" --license-label "MIT"
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli corpus-search material-corpus\index.json "anime ocean foam" --limit 10
+```
+
+Or fetch a reviewed list of direct shader URLs into the local corpus:
+
+```json
+{
+  "source_label": "my-free-shader-list",
+  "license_label": "MIT",
+  "items": [
+    {
+      "url": "https://example.com/shaders/WaterFoam.hlsl",
+      "path": "water/WaterFoam.hlsl",
+      "license": "MIT",
+      "title": "Water Foam"
+    }
+  ]
+}
+```
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli corpus-fetch-manifest shader_sources.json --output-dir material-corpus\raw --index-output material-corpus\index.json
+```
+
+This manifest fetcher is for explicit free/permissive sources. It is not a
+Fab, Marketplace, Unity Asset Store, or paid plugin bypass scraper. Unknown,
+commercial, Marketplace, Fab, and Asset Store license labels are skipped by
+default.
+
+Use `license-label unknown` for unreviewed folders. Those results include risk
+notes and should be treated as inspiration/search leads, not code to copy.
+Pass `--corpus-index material-corpus\index.json` to `generate`, `demo-generate`,
+or `demo-bundle` to store the retrieval context in the pack manifest.
+
+Check readiness before asking for UE permissions:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli doctor
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli doctor --ue-project C:\Path\To\Project.uproject
+```
+
+Preview the full customer gallery flow without Unreal Editor:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli demo-generate "anime ocean foam" --count 12 --output-dir material-packs
+```
+
+This creates synthetic preview images for product demos only. Real acceptance
+still requires UE replay and real screenshots.
+
+Produce a customer-shareable synthetic demo zip in one command:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli demo-bundle "anime ocean foam" --count 12 --output-dir material-packs --output-zip material-packs\anime_ocean_demo.zip
+```
+
+This runs generation, synthetic preview creation, offline-demo verification, and
+zip bundling. The output is clearly marked as `synthetic_demo`.
+
+Verify generated artifacts:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli verify-pack <pack_dir> --mode pack
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli verify-pack <pack_dir> --mode offline-demo
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli verify-pack <pack_dir> --mode ue
+```
+
+Bundle a verified pack:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path src).Path
+.\.venv\Scripts\python.exe -m lethe.material_synth.cli bundle-pack <pack_dir> --mode offline-demo --output material-pack.zip
+```
+
+For real customer delivery, use `--mode ue` after genuine UE replay succeeds.
+
+See `docs/material_synth_mvp.md` for the product plan and
+`docs/material_synth_permissions.md` for the UE validation permission checklist.
 
 ```python
 @mcp.tool()

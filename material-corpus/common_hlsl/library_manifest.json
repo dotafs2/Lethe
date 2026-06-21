@@ -1,0 +1,19 @@
+{
+  "schema": "hlsl-selector.common-library.v1",
+  "modules": [
+    {
+      "id": "ue_import_common",
+      "path": "LetheUEImportCommon.ush",
+      "target": "UE Custom node include",
+      "functions": [
+        "LetheSelectorSaturate01",
+        "LetheSelectorSafeNormalize",
+        "LetheSelectorHash12",
+        "LetheSelectorNoise12",
+        "LetheSelectorFbm4",
+        "LetheSelectorWetBaseColor",
+        "LetheSelectorHeightToWorldOffset"
+      ]
+    }
+  ]
+}

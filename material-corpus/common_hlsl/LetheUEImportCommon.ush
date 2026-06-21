@@ -1,0 +1,63 @@
+#ifndef LETHE_UE_IMPORT_COMMON_USH
+#define LETHE_UE_IMPORT_COMMON_USH
+
+float LetheSelectorSaturate01(float value)
+{
+    return saturate(value);
+}
+
+float3 LetheSelectorSafeNormalize(float3 value, float3 fallback)
+{
+    float len2 = dot(value, value);
+    return len2 > 1.0e-6 ? value * rsqrt(len2) : fallback;
+}
+
+float LetheSelectorHash12(float2 p)
+{
+    float3 p3 = frac(float3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+float LetheSelectorNoise12(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = frac(p);
+    float a = LetheSelectorHash12(i);
+    float b = LetheSelectorHash12(i + float2(1.0, 0.0));
+    float c = LetheSelectorHash12(i + float2(0.0, 1.0));
+    float d = LetheSelectorHash12(i + float2(1.0, 1.0));
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
+float LetheSelectorFbm4(float2 p)
+{
+    float value = 0.0;
+    float amp = 0.5;
+    [unroll]
+    for (int i = 0; i < 4; ++i)
+    {
+        value += LetheSelectorNoise12(p) * amp;
+        p = p * 2.03 + float2(17.1, 9.2);
+        amp *= 0.5;
+    }
+    return value;
+}
+
+float3 LetheSelectorWetBaseColor(float foam, float roughness, float facing)
+{
+    float fresnel = pow(saturate(1.0 - facing), 4.0);
+    float3 asphalt = float3(0.012, 0.013, 0.015);
+    float3 water = float3(0.18, 0.20, 0.22);
+    float3 glint = float3(0.82, 0.86, 0.90);
+    float wet = saturate(fresnel + (1.0 - roughness) * 0.18);
+    return lerp(lerp(asphalt, water, wet), glint, saturate(foam * 0.62));
+}
+
+float3 LetheSelectorHeightToWorldOffset(float height, float gain)
+{
+    return float3(0.0, 0.0, height * gain);
+}
+
+#endif

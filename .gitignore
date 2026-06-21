@@ -12,3 +12,15 @@ dist/
 .DS_Store
 Thumbs.db
 tmp_apt_jpg/
+
+# HLSL selector local runtime outputs
+material-corpus/tmp_chrome*/
+material-corpus/screenshots/
+material-corpus/ue_imports/
+material-corpus/*.log
+material-corpus/*.err.log
+material-corpus/**/*_server.log
+material-corpus/**/*_server.err.log
+
+# Generated material packs are local review artifacts by default.
+material-packs/

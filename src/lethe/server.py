@@ -8,6 +8,8 @@ Tools exposed:
     - polyhaven_set_sky(slug, resolution): download + apply as HDRIBackdrop sky.
     - polyhaven_search_model(query, max_results): list matching 3D models from PolyHaven.
     - polyhaven_spawn_model(slug, ...): download glTF, import as StaticMesh, spawn actor.
+    - material_synth_demo_bundle(prompt, ...): generate a synthetic demo material pack zip.
+    - material_synth_corpus_index/search/fetch_manifest(...): manage local shader references.
 
 Integration toggles (hot-switched): read on every tool call from
 <UEProject>/Saved/Lethe/config.json, written by the Tools > Lethe menu in UE.
@@ -27,6 +29,28 @@ from PIL import Image as PILImage
 from mcp.server.fastmcp import FastMCP, Image
 
 from . import remote_execution as remote
+from .material_synth import (
+    MaterialCandidate,
+    MaterialRequest,
+    analyze_validation_report,
+    build_reference_context,
+    build_offline_demo_report,
+    bundle_pack,
+    export_material_pack,
+    export_candidates_pack,
+    generate_candidates,
+    load_agent_candidates,
+    rank_candidate,
+    run_doctor,
+    validate_agent_candidate_file,
+    verify_pack,
+    build_demo_bundle,
+    fetch_shader_manifest,
+    index_shader_corpus,
+    search_shader_corpus,
+)
+from .material_synth.ue_bridge import build_create_material_script
+from .material_synth.validator import validate_candidate, validate_hlsl_body
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("lethe")
@@ -168,6 +192,506 @@ def clear_tag(tag: str) -> str:
         f"print('deleted', killed, 'actors with tag {tag}')\n"
     )
     return _run_in_ue(code)
+
+
+# ---------------------------------------------------------------------------
+# HLSL material synthesis
+# ---------------------------------------------------------------------------
+
+
+def _candidate_from_json(candidate_json: str) -> MaterialCandidate:
+    try:
+        payload = json.loads(candidate_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"candidate_json is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("candidate_json must decode to an object")
+    return MaterialCandidate.from_dict(payload)
+
+
+@mcp.tool()
+def material_synth_generate(prompt: str, count: int = 12, seed: int = 0) -> str:
+    """Generate HLSL-first material candidates for a natural-language prompt.
+
+    Stage 1 is intentionally computer-friendly: each candidate contains a
+    bounded HLSL function body that targets Lethe's fixed material interface.
+    The result includes static validation status so broken candidates can be
+    rejected before UE sees them.
+    """
+
+    request = MaterialRequest(prompt=prompt, count=count, seed=seed)
+    candidates = generate_candidates(request)
+    return json.dumps(
+        {
+            "prompt": prompt,
+            "count": len(candidates),
+            "candidates": [
+                {
+                    **candidate.to_dict(),
+                    "validation": validate_candidate(candidate).to_dict(),
+                    "rank": rank_candidate(candidate, prompt),
+                }
+                for candidate in candidates
+            ],
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_validate(hlsl_body: str) -> str:
+    """Validate a raw Lethe HLSL material body against stage-1 guardrails."""
+
+    return json.dumps(validate_hlsl_body(hlsl_body).to_dict(), indent=2)
+
+
+@mcp.tool()
+def material_synth_ue_script(
+    candidate_json: str = "",
+    prompt: str = "",
+    variant_index: int = 0,
+    package_path: str = "/Game/Lethe/GeneratedMaterials",
+) -> str:
+    """Build the UE Python script that creates a Material from one candidate.
+
+    Pass either a full `candidate_json` object returned by
+    `material_synth_generate`, or pass `prompt` and `variant_index` to generate
+    locally and select a variant.
+    """
+
+    if candidate_json:
+        candidate = _candidate_from_json(candidate_json)
+    else:
+        if not prompt:
+            raise ValueError("Provide either candidate_json or prompt")
+        candidates = generate_candidates(MaterialRequest(prompt=prompt, count=max(variant_index + 1, 1)))
+        candidate = candidates[variant_index]
+
+    validation = validate_candidate(candidate)
+    if not validation.ok:
+        return json.dumps(
+            {
+                "error": "candidate failed validation",
+                "validation": validation.to_dict(),
+            },
+            indent=2,
+        )
+    return build_create_material_script(candidate, package_path=package_path)
+
+
+@mcp.tool()
+def material_synth_create_in_ue(
+    prompt: str,
+    variant_index: int = 0,
+    package_path: str = "/Game/Lethe/GeneratedMaterials",
+) -> str:
+    """Generate a candidate and execute the material creation script in UE.
+
+    Requires a running Unreal Editor with the Lethe plugin and Remote Execution
+    enabled. Use this after `material_synth_generate` when you want the real UE
+    asset created and compiled by the editor.
+    """
+
+    candidates = generate_candidates(MaterialRequest(prompt=prompt, count=max(variant_index + 1, 1)))
+    candidate = candidates[variant_index]
+    validation = validate_candidate(candidate)
+    if not validation.ok:
+        return json.dumps(
+            {
+                "error": "candidate failed validation",
+                "validation": validation.to_dict(),
+            },
+            indent=2,
+        )
+    return _run_in_ue(build_create_material_script(candidate, package_path=package_path))
+
+
+@mcp.tool()
+def material_synth_export_pack(
+    prompt: str,
+    count: int = 12,
+    seed: int = 0,
+    output_dir: str = "material-packs",
+    include_ue_scripts: bool = True,
+    corpus_index: str = "",
+    reference_limit: int = 5,
+    require_reference_allowed: bool = False,
+) -> str:
+    """Export an offline HLSL material candidate pack for review or UE replay.
+
+    The pack contains `manifest.json`, `index.md`, candidate HLSL files, and
+    optional UE Python scripts that create Material assets from each candidate.
+    This works without a running Unreal Editor.
+    """
+
+    try:
+        reference_context = (
+            build_reference_context(
+                corpus_index,
+                prompt,
+                limit=reference_limit,
+                require_reference_allowed=require_reference_allowed,
+            )
+            if corpus_index
+            else None
+        )
+        manifest = export_material_pack(
+            MaterialRequest(prompt=prompt, count=count, seed=seed),
+            output_dir,
+            include_ue_scripts=include_ue_scripts,
+            reference_context=reference_context,
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "prompt": prompt}, indent=2)
+    return json.dumps(
+        {
+            "pack_id": manifest["pack_id"],
+            "pack_dir": manifest["pack_dir"],
+            "candidate_count": manifest["candidate_count"],
+            "reference_matches": len((manifest.get("reference_context") or {}).get("matches", [])),
+            "manifest": os.path.join(manifest["pack_dir"], "manifest.json"),
+            "index": os.path.join(manifest["pack_dir"], "index.md"),
+            "ue_replay_script": (
+                os.path.join(manifest["pack_dir"], manifest["files"]["ue_replay_script"])
+                if manifest["files"].get("ue_replay_script")
+                else None
+            ),
+            "ue_validation_report": (
+                os.path.join(manifest["pack_dir"], manifest["files"]["ue_validation_report"])
+                if manifest["files"].get("ue_validation_report")
+                else None
+            ),
+            "preview_dir": (
+                os.path.join(manifest["pack_dir"], manifest["files"]["preview_dir"])
+                if manifest["files"].get("preview_dir")
+                else None
+            ),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_export_agent_pack(
+    json_path: str,
+    output_dir: str = "material-packs",
+    include_ue_scripts: bool = True,
+) -> str:
+    """Export a material pack from external agent candidate JSON."""
+
+    try:
+        request, candidates = load_agent_candidates(json_path)
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "json_path": os.path.abspath(json_path)}, indent=2)
+    manifest = export_candidates_pack(
+        request,
+        candidates,
+        output_dir,
+        include_ue_scripts=include_ue_scripts,
+        source="agent_json",
+    )
+    return json.dumps(
+        {
+            "pack_id": manifest["pack_id"],
+            "pack_dir": manifest["pack_dir"],
+            "candidate_count": manifest["candidate_count"],
+            "agent_count": manifest["agent_count"],
+            "manifest": os.path.join(manifest["pack_dir"], "manifest.json"),
+            "index": os.path.join(manifest["pack_dir"], "index.md"),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_validate_agent_json(json_path: str, report_path: str = "") -> str:
+    """Validate external agent candidate JSON before packing or UE replay."""
+
+    try:
+        report = validate_agent_candidate_file(json_path, report_path or None)
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "json_path": os.path.abspath(json_path)}, indent=2)
+    return json.dumps(report, indent=2)
+
+
+@mcp.tool()
+def material_synth_replay_pack_in_ue(pack_dir: str) -> str:
+    """Run a generated material pack's `run_pack_in_ue.py` inside Unreal Editor.
+
+    Requires a running Unreal Editor with Remote Execution enabled. The pack can
+    be produced by `material_synth_export_pack` or the CLI.
+    """
+
+    script_path = os.path.abspath(os.path.join(pack_dir, "run_pack_in_ue.py"))
+    manifest_path = os.path.abspath(os.path.join(pack_dir, "manifest.json"))
+    if not os.path.exists(manifest_path):
+        return json.dumps(
+            {
+                "error": "manifest.json not found",
+                "pack_dir": os.path.abspath(pack_dir),
+            },
+            indent=2,
+        )
+    if not os.path.exists(script_path):
+        return json.dumps(
+            {
+                "error": "run_pack_in_ue.py not found",
+                "pack_dir": os.path.abspath(pack_dir),
+            },
+            indent=2,
+        )
+    with open(script_path, "r", encoding="utf-8") as handle:
+        return _run_in_ue(handle.read())
+
+
+@mcp.tool()
+def material_synth_analyze_pack(pack_dir: str) -> str:
+    """Analyze a pack's UE replay report and write customer_summary files.
+
+    Run this after `material_synth_replay_pack_in_ue` has produced
+    `ue_validation_report.json`.
+    """
+
+    try:
+        summary = analyze_validation_report(pack_dir)
+    except FileNotFoundError as exc:
+        return json.dumps({"error": str(exc), "pack_dir": os.path.abspath(pack_dir)}, indent=2)
+    return json.dumps(
+        {
+            "pack_dir": summary["pack_dir"],
+            "count": summary["count"],
+            "created": summary["created"],
+            "previewed": summary["previewed"],
+            "recommended": summary["recommended"],
+            "summary_json": os.path.join(summary["pack_dir"], "customer_summary.json"),
+            "summary_md": os.path.join(summary["pack_dir"], "customer_summary.md"),
+            "gallery_html": os.path.join(summary["pack_dir"], "customer_gallery.html"),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_demo_pack(pack_dir: str) -> str:
+    """Create synthetic previews and customer gallery for an existing pack.
+
+    This does not run Unreal Editor. Use only for offline product demos.
+    """
+
+    try:
+        result = build_offline_demo_report(pack_dir)
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "pack_dir": os.path.abspath(pack_dir)}, indent=2)
+    return json.dumps(
+        {
+            "pack_dir": result["pack_dir"],
+            "gallery": result["gallery"],
+            "count": result["report"]["count"],
+            "synthetic_demo": True,
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_verify_pack(pack_dir: str, mode: str = "pack") -> str:
+    """Verify material pack artifact completeness.
+
+    mode: pack, offline-demo, or ue.
+    """
+
+    try:
+        report = verify_pack(pack_dir, mode=mode)
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "pack_dir": os.path.abspath(pack_dir)}, indent=2)
+    return json.dumps(report, indent=2)
+
+
+@mcp.tool()
+def material_synth_bundle_pack(
+    pack_dir: str,
+    output_zip: str = "",
+    mode: str = "pack",
+    allow_failed: bool = False,
+) -> str:
+    """Verify and zip a material pack for sharing."""
+
+    try:
+        result = bundle_pack(
+            pack_dir,
+            output_zip=output_zip or None,
+            mode=mode,
+            allow_failed=allow_failed,
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "pack_dir": os.path.abspath(pack_dir)}, indent=2)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def material_synth_demo_bundle(
+    prompt: str,
+    count: int = 12,
+    seed: int = 0,
+    output_dir: str = "material-packs",
+    output_zip: str = "",
+    corpus_index: str = "",
+    reference_limit: int = 5,
+    require_reference_allowed: bool = False,
+) -> str:
+    """Generate, synthetic-preview, verify, and zip a material demo pack."""
+
+    try:
+        result = build_demo_bundle(
+            prompt,
+            output_dir=output_dir,
+            count=count,
+            seed=seed,
+            output_zip=output_zip or None,
+            corpus_index=corpus_index or None,
+            reference_limit=reference_limit,
+            require_reference_allowed=require_reference_allowed,
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "prompt": prompt}, indent=2)
+    return json.dumps(
+        {
+            "ok": result["ok"],
+            "pack_dir": result["pack_dir"],
+            "gallery": result["gallery"],
+            "zip": result["zip"],
+            "count": result["count"],
+            "synthetic_demo": True,
+            "reference_matches": len((result.get("reference_context") or {}).get("matches", [])),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_corpus_index(
+    roots: list[str],
+    output: str = "material-corpus/index.json",
+    source_label: str = "local",
+    license_label: str = "unknown",
+    max_indexed_bytes: int = 524288,
+    extensions: str = "",
+) -> str:
+    """Index local HLSL/GLSL/USH/USF reference files without copying full source."""
+
+    try:
+        extension_list = [item.strip() for item in extensions.split(",") if item.strip()] if extensions else None
+        result = index_shader_corpus(
+            roots,
+            output,
+            source_label=source_label,
+            license_label=license_label,
+            max_indexed_bytes=max_indexed_bytes,
+            extensions=extension_list,
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "roots": roots}, indent=2)
+    return json.dumps(
+        {
+            "index_path": result["index_path"],
+            "file_count": result["file_count"],
+            "total_bytes": result["total_bytes"],
+            "reference_allowed": result["reference_allowed"],
+            "skipped": len(result["skipped"]),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_corpus_search(
+    index_path: str,
+    query: str,
+    limit: int = 10,
+    require_reference_allowed: bool = False,
+) -> str:
+    """Search a local shader corpus index and return snippets plus risk notes."""
+
+    try:
+        result = search_shader_corpus(
+            index_path,
+            query,
+            limit=limit,
+            require_reference_allowed=require_reference_allowed,
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "index_path": os.path.abspath(index_path)}, indent=2)
+    return json.dumps(
+        {
+            "ok": result["ok"],
+            "query": result["query"],
+            "index_path": result["index_path"],
+            "license_label": result.get("license_label"),
+            "reference_allowed": result.get("reference_allowed"),
+            "matches": [
+                {
+                    "score": item["score"],
+                    "path": item["entry"]["path"],
+                    "rel_path": item["entry"]["rel_path"],
+                    "language": item["entry"]["language"],
+                    "license": item["entry"]["license"],
+                    "risk_notes": item["risk_notes"],
+                    "snippet": item["snippet"],
+                }
+                for item in result.get("matches", [])
+            ],
+            "error": result.get("error"),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_corpus_fetch_manifest(
+    manifest_json: str,
+    output_dir: str = "material-corpus/raw",
+    index_output: str = "material-corpus/index.json",
+    allow_unsafe: bool = False,
+    max_bytes: int = 1048576,
+    timeout_seconds: int = 30,
+) -> str:
+    """Download explicit shader URLs from a manifest, record provenance, and index them.
+
+    This is not a Fab/Marketplace bypass scraper. Unknown or commercial-license
+    items are skipped by default; use allow_unsafe only for discovery metadata.
+    """
+
+    try:
+        report = fetch_shader_manifest(
+            manifest_json,
+            output_dir=output_dir,
+            index_output=index_output,
+            allow_unsafe=allow_unsafe,
+            max_bytes=max_bytes,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "manifest_json": os.path.abspath(manifest_json)}, indent=2)
+    return json.dumps(
+        {
+            "downloaded": report["downloaded"],
+            "skipped": report["skipped_count"],
+            "failed": report["failed_count"],
+            "raw_root": report["raw_root"],
+            "report_path": report["report_path"],
+            "index_path": report["index_path"],
+            "indexed_files": report["indexed_files"],
+            "reference_allowed": report["reference_allowed"],
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def material_synth_doctor(ue_project: str = "") -> str:
+    """Read-only readiness check for local material synth and optional UE project."""
+
+    return json.dumps(run_doctor(ue_project or None, repo_root=os.getcwd()), indent=2)
 
 
 # ---------------------------------------------------------------------------

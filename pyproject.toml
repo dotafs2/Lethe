@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 lethe = "lethe.server:main"
 lethe-ws = "lethe.ws_server:main"
+lethe-material-synth = "lethe.material_synth.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
